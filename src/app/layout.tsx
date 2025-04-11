@@ -4,6 +4,7 @@ import "./globals.css"
 
 import Header from "@/components/layouts/Header"
 import Sidebar from "@/components/layouts/Sidebar"
+import Layout from "@/components/layouts/Layout"
 
 // const geistSans = Geist({
 //   variable: "--font-geist-sans",
@@ -31,21 +32,11 @@ export default function RootLayout({
       lang="zh-Hans"
       data-theme="light"
     >
-      <body
-        className="relative h-full w-full overflow-auto antialiased"
-        // className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <Header />
-
-        <aside className="absolute top-12.5 bottom-0 left-0 w-80">
-          <Sidebar />
-        </aside>
-
-        <main className="absolute top-12.5 right-0 bottom-0 left-80 overflow-auto bg-neutral-200 p-2.5">
-          {children}
-          {/*  */}
-        </main>
+      <body className="relative h-full w-full overflow-auto antialiased">
+        <Layout>{children}</Layout>
       </body>
     </html>
   )
 }
+
+// className={`${geistSans.variable} ${geistMono.variable} antialiased`}

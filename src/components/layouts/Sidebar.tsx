@@ -8,7 +8,6 @@ import { RiSettings3Fill } from "react-icons/ri"
 const routes = [
   { Icon: FaHome, title: "主页", href: "/" },
   { Icon: RiArticleFill, title: "博客", href: "/blogs" },
-  { Icon: RiArticleFill, title: "博客", href: "/blogs" },
   { Icon: FaBook, title: "书籍", href: "/books" },
   { Icon: RiSettings3Fill, title: "设置", href: "/setting" },
 ]
@@ -30,7 +29,7 @@ export default function Sidebar() {
       </ul>
 
       <div className="card mx-2.5 mt-2.5 grow-0 overflow-y-auto">
-        <h2 className="card-lable text-sm">卡片标题</h2>
+        <h2 className="card-label">卡片标题</h2>
         {Array(30)
           .fill(null)
           .map((item, index) => {

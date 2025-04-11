@@ -1,4 +1,5 @@
-import { defineDocumentType, makeSource } from "contentlayer/source-files"
+// import { defineDocumentType, makeSource } from "contentlayer/source-files"
+import { defineDocumentType, makeSource } from "contentlayer2/source-files"
 
 const BlogPost = defineDocumentType(() => {
   console.log("define document type")

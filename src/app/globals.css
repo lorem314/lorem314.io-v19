@@ -6,6 +6,7 @@
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 @theme inline {
+  --color-primary-color: var(--primary-color);
   --color-bg-0: var(--bg-0);
   --color-bg-1: var(--bg-1);
   --color-content-bg: var(--content-bg);
@@ -26,14 +27,23 @@
   }
 
   button {
-    line-height: 1.5;
+    line-height: 1.75;
+    @apply rounded px-[0.5em] py-[0.125em];
     @apply cursor-pointer;
+    @apply inline-flex items-center justify-center;
+    @apply break-keep whitespace-nowrap;
   }
-  /*  */
+
   kbd {
     @apply rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-black;
     @apply shadow-[2px_2px_#999];
     @apply hover:relative hover:top-[1px] hover:left-[1px] hover:shadow-[1px_1px_#999];
+  }
+
+  svg {
+    box-sizing: content-box;
+    width: var(--svg-icon-size);
+    height: var(--svg-icon-size);
   }
 }
 
@@ -41,13 +51,11 @@
   .card {
     @apply bg-content-bg rounded p-2.5 shadow;
   }
-  .card-lable {
-    @apply text-label-color mb-1 pb-1 font-bold;
+  .card-label {
+    @apply block;
+    @apply text-label-color mb-2.5 pb-1.5 font-bold;
     @apply border-label-border-color border-b;
   }
-}
-
-@layer utilities {
   .misc-button {
     --svg-icon-size: 1.125em;
     @apply rounded p-2;
@@ -55,6 +63,18 @@
     @apply hover:bg-misc-button-hover-bg;
     @apply active:text-misc-button-active-color active:bg-misc-button-active-bg;
     @apply transition-colors duration-150 ease-in-out;
+  }
+  .input-helper-button {
+    @apply opacity-60 hover:opacity-100 active:opacity-100;
+    @apply p-1.5;
+  }
+}
+
+@layer utilities {
+  .no-focus-ring {
+    @apply focus:ring-0 focus:ring-transparent;
+    @apply focus-visible:ring-0 focus-visible:ring-transparent;
+    @apply focus:border-transparent focus-visible:border-transparent;
   }
 }
 
@@ -89,8 +109,11 @@ body {
   box-sizing: border-box;
 }
 
-svg {
-  box-sizing: content-box;
-  width: var(--svg-icon-size);
-  height: var(--svg-icon-size);
+input[type="text"],
+input[type="search"] {
+  line-height: 1.75;
+  @apply w-full;
+  @apply rounded border border-neutral-400 px-2 py-1.5 hover:border-neutral-600;
+  @apply outline-none;
+  /* @apply focus:ring-1 focus:ring-blue-600; */
 }
