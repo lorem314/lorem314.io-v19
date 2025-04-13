@@ -1,5 +1,6 @@
 // import { defineDocumentType, makeSource } from "contentlayer/source-files"
 import { defineDocumentType, makeSource } from "contentlayer2/source-files"
+import { remarkCodeHike } from "codehike/mdx"
 
 const BlogPost = defineDocumentType(() => {
   console.log("define document type")
@@ -19,6 +20,6 @@ export default makeSource({
   contentDirPath: "published",
   documentTypes: [BlogPost],
   mdx: {
-    remarkPlugins: [],
+    remarkPlugins: [[remarkCodeHike, { components: { code: "CodeHikePre" } }]],
   },
 })

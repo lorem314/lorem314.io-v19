@@ -1,29 +1,34 @@
 import { useMDXComponent } from "next-contentlayer2/hooks"
 
-import Actions from "./Actions"
-import Toc from "./Toc"
+import type { ReactElement, ReactNode } from "react"
+import type { BlogPost } from "contentlayer/generated"
 
-export default function Article({ bodyCode }: { bodyCode: string }) {
+import CodeHikePre from "../elements/CodeHikePre"
+
+export default function Article({
+  header,
+  bodyCode,
+  footer,
+}: {
+  header: ReactNode
+  bodyCode: string
+  footer: ReactNode
+}) {
   const MDXContent = useMDXComponent(bodyCode)
 
   return (
-    <div
-      className={`relative mx-auto my-8 grid max-w-6xl grid-cols-[2rem_minmax(0,_auto)_minmax(0,_24rem)] gap-2.5`}
-    >
-      {/*  */}
+    <article>
+      <header className="bg-content-bg mb-2.5 rounded p-2.5 shadow">
+        {header}
+      </header>
 
-      <aside className="">
-        <Actions />
-      </aside>
-
-      <div>
-        <MDXContent />
-        <p>helo</p>
+      <div className="bg-content-bg rounded p-2.5 shadow">
+        <MDXContent components={{ CodeHikePre }} />
       </div>
 
-      <Toc />
-
-      {/*  */}
-    </div>
+      <footer className="bg-content-bg mt-2.5 rounded p-2.5 shadow">
+        {footer}
+      </footer>
+    </article>
   )
 }

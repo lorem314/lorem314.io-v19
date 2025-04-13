@@ -2,8 +2,9 @@
 
 import { useContext } from "react"
 
-import Actions from "./Actions"
-import Toc from "./Toc"
+import Form from "@/components/blog/Form"
+import AllTags from "@/components/blog/AllTags"
+import { Tag } from "@/types"
 
 import Drawer from "../ui/Drawer"
 
@@ -11,23 +12,25 @@ import GlobalContext from "../layouts/GlobalContext"
 
 export default function Layout({
   children,
+  allTags,
 }: Readonly<{
   children: React.ReactNode
+  allTags: Tag[]
 }>) {
   const { hasRightDrawer, isRightDrawerOpen, handleRightDrawer } =
     useContext(GlobalContext)
 
   return (
-    <div
-      className={`mx-auto my-8 grid max-w-7xl gap-2.5 ${hasRightDrawer ? "grid-cols-[2rem_minmax(0,_auto)]" : "grid-cols-[2rem_minmax(0,_auto)_minmax(0,_24rem)]"}`}
-    >
-      {/*  */}
+    <div className="mx-auto my-8 grid max-w-6xl grid-cols-8 gap-2.5">
+      <section className="card col-span-8 gap-2.5">
+        <Form allTags={allTags} />
+      </section>
 
-      <aside>
-        <Actions />
-      </aside>
-
-      {children}
+      <section
+        className={`card ${hasRightDrawer ? "col-span-full" : "col-span-5"}`}
+      >
+        {children}
+      </section>
 
       {hasRightDrawer ? (
         <Drawer
@@ -40,20 +43,17 @@ export default function Layout({
           {() => {
             return (
               <div>
-                <Toc />
+                <AllTags allTags={allTags} />
               </div>
             )
           }}
         </Drawer>
       ) : (
-        <aside>
-          <div className="bg-content-bg rounded p-2.5 shadow">
-            <Toc />
-          </div>
-        </aside>
+        <section className="card col-span-3">
+          <h2 className="card-label">所有标签(99)</h2>
+          <AllTags allTags={allTags} />
+        </section>
       )}
-
-      {/*  */}
     </div>
   )
 }

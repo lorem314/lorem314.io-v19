@@ -9,9 +9,15 @@ import Social from "./Social"
 export default function Header({
   hasLeftDrawer,
   openLeftDrawer,
+  hasRightDrawer,
+  openRightDrawer,
+  RightDrawerIcon,
 }: {
   hasLeftDrawer: boolean
   openLeftDrawer: () => void
+  hasRightDrawer: boolean
+  openRightDrawer: () => void
+  RightDrawerIcon: IconType | null
 }) {
   return (
     <header className="bg-primary-color flex h-12.5 items-center justify-between gap-2.5 px-2.5 text-white">
@@ -31,6 +37,12 @@ export default function Header({
       <Search />
 
       <Social />
+
+      {hasRightDrawer && RightDrawerIcon ? (
+        <button onClick={() => openRightDrawer()}>
+          <RightDrawerIcon className="h-5 w-5" />
+        </button>
+      ) : null}
     </header>
   )
 }

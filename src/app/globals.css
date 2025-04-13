@@ -22,6 +22,7 @@
 }
 
 @layer base {
+  /*  */
   a {
     @apply underline-offset-4 hover:underline;
   }
@@ -109,6 +110,13 @@ body {
   box-sizing: border-box;
 }
 
+html {
+  overflow: hidden;
+}
+body {
+  overflow: hidden;
+}
+/*  */
 input[type="text"],
 input[type="search"] {
   line-height: 1.75;

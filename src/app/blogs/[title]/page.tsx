@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import { allBlogPosts } from "contentlayer/generated"
-import { useMDXComponent } from "next-contentlayer/hooks"
 
+import Layout from "@/components/article/Layout"
 import Article from "@/components/article/Article"
 
 export default async function Page({
@@ -23,15 +23,22 @@ export default async function Page({
 
   console.log("blogPost", blogPost._raw.flattenedPath)
 
-  // const MDXContent = useMDXComponent(blogPost.body.code)
-  // const renderedMDX = <MDXContent components={{}} />
-
   return (
-    <div>
-      <p>params.title (decoded) {decodedTitle}</p>
-      <Article bodyCode={blogPost.body.code} />
-      {/* {renderedMDX} */}
-    </div>
+    <Layout>
+      <Article
+        header={
+          <>
+            <h1>h1 title</h1>
+          </>
+        }
+        bodyCode={blogPost.body.code}
+        footer={
+          <>
+            <p>footer</p>
+          </>
+        }
+      />
+    </Layout>
   )
 }
 
