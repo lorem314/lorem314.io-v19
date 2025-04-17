@@ -9,21 +9,28 @@ import Drawer from "../ui/Drawer"
 
 import GlobalContext from "../layouts/GlobalContext"
 
+import type { Toc as TypeToc } from "@/types"
+import type { BlogPost, BookChapter } from "contentlayer/generated"
+
 export default function Layout({
   children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+  toc,
+  title,
+}: {
+  children: Readonly<React.ReactNode>
+  toc: TypeToc
+  title: string
+}) {
   const { hasRightDrawer, isRightDrawerOpen, handleRightDrawer } =
     useContext(GlobalContext)
 
   return (
     <div
-      className={`mx-auto my-8 grid max-w-7xl gap-2.5 ${hasRightDrawer ? "grid-cols-[2rem_minmax(0,_auto)]" : "grid-cols-[2rem_minmax(0,_auto)_minmax(0,_24rem)]"}`}
+      className={`relative mx-auto my-8 grid max-w-7xl gap-2.5 ${hasRightDrawer ? "grid-cols-[2rem_minmax(0,_auto)]" : "grid-cols-[2rem_minmax(0,_auto)_minmax(0,_24rem)]"}`}
     >
       {/*  */}
 
-      <aside>
+      <aside className="">
         <Actions />
       </aside>
 
@@ -35,20 +42,20 @@ export default function Layout({
           onClose={handleRightDrawer.close}
           placement="right"
           size={360}
-          title="所有标签"
+          title="目录"
         >
           {() => {
             return (
-              <div>
-                <Toc />
+              <div className="p-2.5">
+                <Toc title={title} toc={toc} />
               </div>
             )
           }}
         </Drawer>
       ) : (
         <aside>
-          <div className="bg-content-bg rounded p-2.5 shadow">
-            <Toc />
+          <div className="page-content sticky top-2.5 max-h-[calc(100vh-50px-2rem-10px)] overflow-y-auto">
+            <Toc title={title} toc={toc} />
           </div>
         </aside>
       )}

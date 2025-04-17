@@ -86,7 +86,7 @@ const Portal = ({
               : "flex-row justify-between"
           } items-center gap-2.5`}
         >
-          <h2 className="text-lg font-bold">{title ? title : "lorem314.io"}</h2>
+          <h2 className="font-bold">{title ? title : "lorem314.io"}</h2>
           <button
             className="bg-misc-button-bg hover:bg-misc-button-hover-bg rounded p-2"
             onClick={handleCloseDrawer}

@@ -21,15 +21,15 @@ export default function Sidebar() {
           return (
             <li key={index} className="flex">
               <Link href={href} className="misc-button">
-                <Icon className="" />
+                <Icon />
               </Link>
             </li>
           )
         })}
       </ul>
 
-      <div className="card mx-2.5 mt-2.5 grow-0 overflow-y-auto">
-        <h2 className="card-label">卡片标题</h2>
+      <div className="page-content mx-2.5 mt-2.5 grow-0 overflow-y-auto">
+        <h2 className="content-title">卡片标题</h2>
         {Array(30)
           .fill(null)
           .map((item, index) => {

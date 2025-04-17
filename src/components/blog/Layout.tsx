@@ -22,13 +22,14 @@ export default function Layout({
 
   return (
     <div className="mx-auto my-8 grid max-w-6xl grid-cols-8 gap-2.5">
-      <section className="card col-span-8 gap-2.5">
+      <section className="page-content col-span-8 gap-2.5">
         <Form allTags={allTags} />
       </section>
 
       <section
-        className={`card ${hasRightDrawer ? "col-span-full" : "col-span-5"}`}
+        className={`page-content ${hasRightDrawer ? "col-span-full" : "col-span-5"}`}
       >
+        <h2 className="content-title">博客(999)</h2>
         {children}
       </section>
 
@@ -49,8 +50,8 @@ export default function Layout({
           }}
         </Drawer>
       ) : (
-        <section className="card col-span-3">
-          <h2 className="card-label">所有标签(99)</h2>
+        <section className="page-content col-span-3">
+          <h2 className="content-title">所有标签(99)</h2>
           <AllTags allTags={allTags} />
         </section>
       )}

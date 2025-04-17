@@ -3,6 +3,7 @@ import { allBlogPosts } from "contentlayer/generated"
 
 import Layout from "@/components/article/Layout"
 import Article from "@/components/article/Article"
+import Tags from "@/components/blog/Tags"
 
 export default async function Page({
   params,
@@ -13,7 +14,7 @@ export default async function Page({
   const decodedTitle = decodeURIComponent(awaitedParams.title)
 
   const blogPost = allBlogPosts.find(
-    (blogPost) => blogPost._raw.flattenedPath === `blogs/${decodedTitle}`,
+    (blogPost) => blogPost.title === decodedTitle,
   )
 
   if (!blogPost) {
@@ -24,11 +25,14 @@ export default async function Page({
   console.log("blogPost", blogPost._raw.flattenedPath)
 
   return (
-    <Layout>
+    <Layout title={blogPost.title} toc={blogPost.meta.toc}>
       <Article
         header={
           <>
-            <h1>h1 title</h1>
+            <h1 className="text-[1.625rem]">{blogPost.title}</h1>
+            <div>
+              <Tags tags={blogPost.tags} />
+            </div>
           </>
         }
         bodyCode={blogPost.body.code}

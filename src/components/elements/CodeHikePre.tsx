@@ -9,9 +9,11 @@ export default async function CodeHikePre({
   const highlighted = await highlight(codeblock, "github-light")
 
   return (
-    <div>
-      <p>code hike pre title</p>
-      <div className="overflow-auto">
+    <div className="my-8">
+      <div className="border border-neutral-400 p-2.5 font-bold first:rounded-t-md">
+        code hike pre title
+      </div>
+      <div className="overflow-auto rounded-b-md border border-t-0 border-neutral-400 p-2.5">
         <Pre code={highlighted} />
       </div>
     </div>

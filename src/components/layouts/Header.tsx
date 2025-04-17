@@ -39,7 +39,10 @@ export default function Header({
       <Social />
 
       {hasRightDrawer && RightDrawerIcon ? (
-        <button onClick={() => openRightDrawer()}>
+        <button
+          className="hover:bg-misc-button-hover-bg rounded bg-black/10 p-1.5"
+          onClick={() => openRightDrawer()}
+        >
           <RightDrawerIcon className="h-5 w-5" />
         </button>
       ) : null}

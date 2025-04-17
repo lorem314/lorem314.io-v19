@@ -4,7 +4,7 @@ import BlogPostItem from "./BlogPostItem"
 
 export default function BlogPostList({ blogPosts }: { blogPosts: BlogPost[] }) {
   return (
-    <ul>
+    <ul className="flex flex-col gap-2.5 px-2.5 pb-2.5">
       {blogPosts.map((blogPost, index) => {
         return (
           <li key={blogPost._id}>

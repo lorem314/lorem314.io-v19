@@ -4,7 +4,7 @@ import { useState, useRef } from "react"
 import type { ChangeEvent, KeyboardEvent } from "react"
 import { useSearchParams, usePathname, useRouter } from "next/navigation"
 
-import useDebounce from "../hooks/useDebounce"
+import useDebounce from "@/hooks/useDebounce"
 
 export default function Search() {
   const ref = useRef<HTMLInputElement>(null)
@@ -45,9 +45,9 @@ export default function Search() {
 
   return (
     <div>
-      <label className="card-label" htmlFor="blog-search">
-        搜索内容
-      </label>
+      <h2 className="content-title">
+        <label htmlFor="blog-search">搜索内容</label>
+      </h2>
       <input
         ref={ref}
         className="focus:ring-1 focus:ring-blue-600"
