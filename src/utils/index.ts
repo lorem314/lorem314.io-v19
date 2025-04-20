@@ -25,3 +25,8 @@ export const ObjectGroupBy = <T>(
     return obj
   }, {})
 }
+
+export const urlFriendly = (title: string | undefined) => {
+  if (!title) return undefined
+  return title.replaceAll(/(\/|#|\s|&|\?|%)/g, "")
+}

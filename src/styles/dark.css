@@ -17,4 +17,8 @@
 
   --label-color: #b3b3b3;
   --label-border-color: hsla(0, 0%, 61%, 0.1);
+
+  --tooltip-color: #181818;
+  --tooltip-bg: hsla(0, 0%, 78%, 0.9);
+  --tooltip-border-color: rgba(0, 0, 0, 0.1);
 }

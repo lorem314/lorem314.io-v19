@@ -1,6 +1,6 @@
-type Placement4 = "top" | "left" | "right" | "bottom"
+export type Placement4 = "top" | "left" | "right" | "bottom"
 
-type Placement8 =
+export type Placement8 =
   | Placement4
   | "top-left"
   | "top-right"
@@ -20,3 +20,5 @@ export type TocItem = {
 export type Toc = {
   items: TocItem[]
 }
+
+export type PreferedTheme = "system" | "light" | "dark"

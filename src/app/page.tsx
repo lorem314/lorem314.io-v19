@@ -14,6 +14,11 @@ export default function Home() {
     <div className="page-content mx-auto my-8 max-w-2xl">
       <h2 className="content-title">主页</h2>
 
+      <p className="text-[1.5rem]">
+        Lorem ipsum dolor sit, amet consectetur adipisicing elit. Reiciendis
+        laudantium atque unde ad?
+      </p>
+
       {Array(8)
         .fill(null)
         .map((_, index) => {

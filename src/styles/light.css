@@ -17,4 +17,8 @@
 
   --label-color: #344f71;
   --label-border-color: rgba(58, 58, 58, 0.1);
+
+  --tooltip-color: #f7f7f7;
+  --tooltip-bg: rgba(0, 0, 0, 0.8);
+  --tooltip-border-color: hsla(0, 0%, 100%, 0.1);
 }

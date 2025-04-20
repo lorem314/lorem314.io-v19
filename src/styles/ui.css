@@ -50,3 +50,43 @@ ul.tree-list > li > details > summary > .details-head-in-toc::before {
 ul.tree-list > li > details.close > summary > .details-head-in-toc::before {
   border-color: transparent;
 }
+
+/* tooltip */
+.tooltip::after {
+  position: absolute;
+  content: "";
+  width: 0;
+  height: 0;
+}
+.tooltip.top::after {
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--tooltip-bg);
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+.tooltip.right::after {
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-right: 6px solid var(--tooltip-bg);
+  top: 50%;
+  left: -6px;
+  transform: translate(0, -50%);
+}
+.tooltip.bottom::after {
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--tooltip-bg);
+  top: -6px;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+.tooltip.left::after {
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 6px solid var(--tooltip-bg);
+  top: 50%;
+  left: 100%;
+  transform: translate(0, -50%);
+}

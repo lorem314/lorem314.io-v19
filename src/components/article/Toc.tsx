@@ -8,6 +8,7 @@ import {
 import { VscCollapseAll, VscExpandAll } from "react-icons/vsc"
 
 import Details from "../elements/Details"
+import { urlFriendly } from "@/utils"
 
 import type { Toc as TypeToc, TocItem } from "@/types"
 
@@ -50,13 +51,16 @@ const Items = ({ items, level }: { items: TocItem[]; level: number }) => {
 }
 
 const Item = ({ item, level }: { item: TocItem; level: number }) => {
+  const id = urlFriendly(item.title)
   if (!item.items) {
-    return <a href="/">{item.title}</a>
+    return <a href={`#${id}`}>{item.title}</a>
   }
   return (
     <Details isOpen={true}>
       <div className="details-head-in-toc group">
-        <a href="/">{item.title}</a>
+        <a href={`#${id}`} onClick={justStopPropagation}>
+          {item.title}
+        </a>
         <div className="grow" />
         <button className="opacity-0 group-hover:opacity-50 hover:opacity-100">
           <VscExpandAll className="size-6" />
@@ -69,3 +73,5 @@ const Item = ({ item, level }: { item: TocItem; level: number }) => {
     </Details>
   )
 }
+
+const justStopPropagation = (event: MouseEvent) => event.stopPropagation()

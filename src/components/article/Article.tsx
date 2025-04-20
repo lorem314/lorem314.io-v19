@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react"
 import type { BlogPost } from "contentlayer/generated"
 
 import CodeHikePre from "../elements/CodeHikePre"
+import Counter from "../Counter"
 
 export default function Article({
   header,
@@ -22,8 +23,11 @@ export default function Article({
         {header}
       </header>
 
-      <div className="bg-content-bg rounded p-2.5 shadow">
-        <MDXContent components={{ CodeHikePre }} />
+      <div
+        id="mdx-content-container"
+        className="bg-content-bg rounded p-2.5 shadow"
+      >
+        <MDXContent components={{ CodeHikePre, Counter }} />
       </div>
 
       <footer className="bg-content-bg mt-2.5 rounded p-2.5 shadow">
@@ -32,3 +36,6 @@ export default function Article({
     </article>
   )
 }
+
+// 在 components 中添加 Counter 组件后
+// 可在 mdx 文件中直接使用 <Counter /> 组件

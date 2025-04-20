@@ -1,5 +1,5 @@
-import type { RawCode } from "codehike/code"
 import { Pre, highlight } from "codehike/code"
+import type { RawCode } from "codehike/code"
 
 export default async function CodeHikePre({
   codeblock,

@@ -2,8 +2,12 @@
 
 import { useState, useContext } from "react"
 
+import { IoMdRefresh } from "react-icons/io"
+
 import RangeInput from "@/components/ui/RangeInput"
 import GlobalContext from "@/components/layouts/GlobalContext"
+
+import { PreferedTheme } from "@/types"
 
 export default function PageSetting() {
   const {
@@ -13,6 +17,8 @@ export default function PageSetting() {
     setIsLeftDrawerAlwaysCollapsed,
     isRightDrawerAlwaysCollapsed,
     setIsRightDrawerAlwaysCollapsed,
+    leftDrawerWidth,
+    setLeftDrawerWidth,
   } = useContext(GlobalContext)
 
   const [value, setValue] = useState(100)
@@ -28,7 +34,7 @@ export default function PageSetting() {
           value={preferredTheme}
           onChange={(event) => {
             console.log("event", event.target.value)
-            setPreferredTheme(event.target.value)
+            setPreferredTheme(event.target.value as PreferedTheme)
           }}
         >
           <option value="system">系统</option>
@@ -65,6 +71,26 @@ export default function PageSetting() {
           }}
         />
         <span className="">总是折叠右侧抽屉</span>
+      </label>
+
+      <label
+        className="my-2 flex items-center gap-2.5"
+        htmlFor="left-drawer-width-slider"
+      >
+        <span>左侧抽屉宽度</span>
+        <RangeInput
+          value={leftDrawerWidth}
+          min={300}
+          max={500}
+          step={10}
+          onChange={setLeftDrawerWidth}
+        />
+        <button
+          className="opacity-50 hover:opacity-100"
+          onClick={() => setLeftDrawerWidth(320)}
+        >
+          <IoMdRefresh />
+        </button>
       </label>
 
       <div className="my-8">

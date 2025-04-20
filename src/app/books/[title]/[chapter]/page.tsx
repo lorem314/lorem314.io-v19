@@ -3,6 +3,8 @@ import { allBookCovers, allBookChapters } from "contentlayer/generated"
 import Layout from "@/components/article/Layout"
 import Article from "@/components/article/Article"
 
+import { H1 } from "@/components/elements/headings"
+
 export default async function PageBookChapter({
   params,
 }: {
@@ -32,15 +34,19 @@ export default async function PageBookChapter({
   }
 
   // console.log("bookChapter", bookChapter)
-
-  console.log("bookChapter toc", bookChapter.meta.toc)
+  // console.log("bookChapter toc", bookChapter.meta.toc)
 
   return (
     <Layout title={bookChapter.title} toc={bookChapter.meta.toc}>
       <Article
         header={
           <>
-            <h1>header title</h1>
+            <div className="mb-1 border-b border-black pb-1 text-right text-[1.75rem] font-bold">
+              第 {bookChapter.chapter} 章
+            </div>
+            <h1 className="text-right text-[1.75rem] font-bold">
+              {bookChapter.title}
+            </h1>
           </>
         }
         bodyCode={bookChapter.body.code}
@@ -50,8 +56,6 @@ export default async function PageBookChapter({
           </>
         }
       />
-      {/* <p>title : {decodedTitle}</p>
-      <p>chapter : {decodedChapter}</p> */}
     </Layout>
   )
 }

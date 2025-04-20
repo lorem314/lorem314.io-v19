@@ -20,11 +20,13 @@ import useLocalStorage from "@/hooks/useLocalStorage"
 
 import GlobalContext from "./GlobalContext"
 
+import type { PreferedTheme } from "@/types"
+
 export default function Layout({ children }: { children: ReactNode }) {
   const isClient = useClient()
   const pathname = usePathname()
 
-  const [preferredTheme, setPreferredTheme] = useLocalStorage(
+  const [preferredTheme, setPreferredTheme] = useLocalStorage<PreferedTheme>(
     "preferred-theme",
     "system",
   )
@@ -33,6 +35,11 @@ export default function Layout({ children }: { children: ReactNode }) {
     useLocalStorage("is-left-drawer-always-collapsed", false)
   const [isRightDrawerAlwaysCollapsed, setIsRightDrawerAlwaysCollapsed] =
     useLocalStorage("is-right-drawer-always-collapsed", false)
+
+  const [leftDrawerWidth, setLeftDrawerWidth] = useLocalStorage(
+    "left-drawer-width",
+    320,
+  )
 
   const {
     isCollapsed: isLeftDrawerCollapsed,
@@ -72,14 +79,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     if (preferredTheme === "system") {
       darkQuery.addEventListener("change", handleThemeChange)
       const dataTheme = darkQuery.matches ? "dark" : "light"
-      // document.documentElement.classList.remove("light")
-      // document.documentElement.classList.remove("dark")
-      // document.documentElement.classList.add(dataTheme)
       document.documentElement.setAttribute("data-theme", dataTheme)
     } else {
-      // document.documentElement.classList.remove("light")
-      // document.documentElement.classList.remove("dark")
-      // document.documentElement.classList.add(preferredTheme)
       document.documentElement.setAttribute("data-theme", preferredTheme)
     }
 
@@ -101,6 +102,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         setIsLeftDrawerAlwaysCollapsed,
         isRightDrawerAlwaysCollapsed,
         setIsRightDrawerAlwaysCollapsed,
+        leftDrawerWidth,
+        setLeftDrawerWidth,
       }}
     >
       <Header
@@ -115,19 +118,23 @@ export default function Layout({ children }: { children: ReactNode }) {
         <Drawer
           isOpen={isLeftDrawerOpen}
           placement="left"
-          size={20 * 16}
+          size={leftDrawerWidth}
           onClose={handleLeftDrawer.close}
         >
           <Sidebar />
         </Drawer>
       ) : (
-        <aside className="absolute top-12.5 bottom-0 left-0 w-80">
+        <aside
+          className="absolute top-12.5 bottom-0 left-0 w-80"
+          style={{ width: `${leftDrawerWidth}px` }}
+        >
           <Sidebar />
         </aside>
       )}
 
       <main
-        className={`absolute top-12.5 right-0 bottom-0 ${hasLeftDrawer ? "left-0" : "left-80"} overflow-auto px-2.5`}
+        className={`absolute top-12.5 right-0 bottom-0 overflow-auto px-2.5`}
+        style={{ left: hasLeftDrawer ? "0" : `${leftDrawerWidth}px` }}
       >
         {children}
         <Footer />

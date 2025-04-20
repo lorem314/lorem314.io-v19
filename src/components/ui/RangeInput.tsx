@@ -168,19 +168,19 @@ export default function RangeInput({
 
   return (
     <>
-      <div className="flex items-center gap-1.5 border border-green-400">
-        <button className="border border-red-400" onClick={stepBackward}>
+      <div className="flex items-center rounded-lg border border-neutral-500">
+        <button className="opacity-50 hover:opacity-100" onClick={stepBackward}>
           <BiChevronLeft className="size-6" />
         </button>
         <input
           ref={refInput}
-          className={`w-full cursor-default appearance-none border border-blue-400 px-2.5 py-1 ${isEditing ? "text-right" : "text-center"} `}
+          className={`w-full cursor-default appearance-none border-x border-neutral-500 py-0.5 ${isEditing ? "text-right" : "text-center"} `}
           type="number"
           onKeyDown={handleKeyDown}
           onBlur={() => setIsEditing(false)}
           onContextMenu={(e) => e.preventDefault()}
         />
-        <button className="border border-red-400" onClick={stepForward}>
+        <button className="opacity-50 hover:opacity-100" onClick={stepForward}>
           <BiChevronRight className="size-6" />
         </button>
       </div>

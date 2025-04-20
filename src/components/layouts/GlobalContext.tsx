@@ -1,16 +1,20 @@
 import { createContext } from "react"
 
+import { PreferedTheme } from "@/types"
+
 type GlobalContextProps = {
   test: string
   hasRightDrawer: boolean
   isRightDrawerOpen: boolean
   handleRightDrawer: { open: () => void; close: () => void }
-  preferredTheme: string
-  setPreferredTheme: (arg0: string) => void
+  preferredTheme: PreferedTheme
+  setPreferredTheme: (arg0: PreferedTheme) => void
   isLeftDrawerAlwaysCollapsed: boolean
   setIsLeftDrawerAlwaysCollapsed: (arg0: boolean) => void
   isRightDrawerAlwaysCollapsed: boolean
   setIsRightDrawerAlwaysCollapsed: (arg0: boolean) => void
+  leftDrawerWidth: number
+  setLeftDrawerWidth: (arg0: number) => void
 }
 
 const GlobalContext = createContext<GlobalContextProps>({
@@ -24,6 +28,8 @@ const GlobalContext = createContext<GlobalContextProps>({
   setIsLeftDrawerAlwaysCollapsed: () => {},
   isRightDrawerAlwaysCollapsed: false,
   setIsRightDrawerAlwaysCollapsed: () => {},
+  leftDrawerWidth: 320,
+  setLeftDrawerWidth: () => {},
 })
 
 export default GlobalContext

@@ -1,3 +1,4 @@
+import { memo } from "react"
 import Link from "next/link"
 
 import { FaHome } from "react-icons/fa"
@@ -12,7 +13,7 @@ const routes = [
   { Icon: RiSettings3Fill, title: "设置", href: "/setting" },
 ]
 
-export default function Sidebar() {
+const Sidebar = () => {
   return (
     <nav className="bg-bg-1 flex h-full">
       <ul className="bg-bg-0 flex shrink-0 basis-12.5 flex-col items-center gap-2.5 pt-2.5">
@@ -46,3 +47,5 @@ export default function Sidebar() {
     </nav>
   )
 }
+
+export default memo(Sidebar)

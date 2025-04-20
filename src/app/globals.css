@@ -23,6 +23,10 @@
 
   --color-label-color: var(--label-color);
   --color-label-border-color: var(--label-border-color);
+
+  --color-tooltip-color: var(--tooltip-color);
+  --color-tooltip-bg: var(--tooltip-bg);
+  --color-tooltip-border-color: var(--tooltip-border-color);
 }
 
 @layer base {
@@ -60,7 +64,8 @@
   }
 
   svg {
-    box-sizing: content-box;
+    display: block;
+    /* box-sizing: content-box; */
     width: var(--svg-icon-size);
     height: var(--svg-icon-size);
   }
@@ -147,7 +152,7 @@ body {
   overflow: hidden;
   @apply bg-bg-0;
 }
-/*  */
+
 input[type="text"],
 input[type="search"] {
   line-height: 1.75;
@@ -161,3 +166,28 @@ input[type="checkbox"] {
   height: 1.125em;
   line-height: 1.75;
 }
+
+#mdx-content-container h2 {
+  font-size: 1.625rem;
+  margin: 2.25rem 0 1rem;
+}
+#mdx-content-container h3 {
+  font-size: 1.5rem;
+  margin: 2rem 0 1rem;
+}
+#mdx-content-container h4 {
+  font-size: 1.375rem;
+  margin: 1.75rem 0 1rem;
+}
+#mdx-content-container h5 {
+  font-size: 1.25rem;
+  margin: 1.5rem 0 1rem;
+}
+#mdx-content-container h6 {
+  font-size: 1.125rem;
+  margin: 1.25rem 0 1rem;
+}
+#mdx-content-container > section:first-child > h2 {
+  margin-top: 0;
+}
+/*  */

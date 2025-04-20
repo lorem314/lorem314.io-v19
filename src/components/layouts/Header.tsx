@@ -5,6 +5,7 @@ import type { IconType } from "react-icons"
 
 import Search from "./Search"
 import Social from "./Social"
+import Theme from "./Theme"
 
 export default function Header({
   hasLeftDrawer,
@@ -46,6 +47,8 @@ export default function Header({
           <RightDrawerIcon className="h-5 w-5" />
         </button>
       ) : null}
+
+      <Theme />
     </header>
   )
 }
