@@ -2,6 +2,7 @@
   color-scheme: light;
 
   --primary-color: #2c5c97;
+  --link-color: #d23669;
 
   --app-color: #333;
   --content-bg: #fdfdfd;
@@ -21,4 +22,42 @@
   --tooltip-color: #f7f7f7;
   --tooltip-bg: rgba(0, 0, 0, 0.8);
   --tooltip-border-color: hsla(0, 0%, 100%, 0.1);
+
+  /* ui */
+  --ui-default-border-color: #d2d2d2;
+  /* --ui-default-hover-border-color: rgba(58, 58, 58, 0.5); */
+  /* --ui-default-focus-border-color: rgb(); */
+
+  /* code hike */
+  --ch-border-color: #d1d5db;
+  --ch-pre-title-foreground: #24292f;
+  --ch-pre-title-background: #f8fafc;
+
+  --ch-0: light;
+  --ch-1: #6e7781;
+  --ch-2: #0550ae;
+  --ch-3: #953800;
+  --ch-4: #24292f;
+  --ch-5: #8250df;
+  --ch-6: #116329;
+  --ch-7: #cf222e;
+  --ch-8: #0a3069;
+  --ch-9: #82071e;
+  --ch-10: #f6f8fa;
+  --ch-11: #ffebe9;
+  --ch-12: #dafbe1;
+  --ch-13: #ffd8b5;
+  --ch-14: #eaeef2;
+  --ch-15: #57606a;
+  --ch-16: #ffffff;
+  --ch-17: #eaeef280;
+  --ch-18: #fdff0033;
+  --ch-19: #1a85ff;
+  --ch-20: #add6ff;
+  --ch-21: #0969da;
+  --ch-22: #f6f8fa;
+  --ch-23: #d0d7de;
+  --ch-24: #8c959f;
+  --ch-25: #afb8c133;
+  --ch-26: #ffffffe6;
 }

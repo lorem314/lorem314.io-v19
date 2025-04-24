@@ -10,12 +10,14 @@ type DetailsProps = {
   children: ReactNode[]
 }
 
-const Details = (props: DetailsProps) => {
+const Details = forwardRef((props: DetailsProps, ref) => {
   const { children } = props
   const [isOpen, setIsOpen] = useState(props.isOpen)
 
   const open = () => setIsOpen(true)
   const close = () => setIsOpen(false)
+
+  useImperativeHandle(ref, () => ({ open, close }), [])
 
   return (
     <details open={isOpen} className={`${isOpen ? "open" : "close"}`}>
@@ -43,7 +45,7 @@ const Details = (props: DetailsProps) => {
       {children[1]}
     </details>
   )
-}
+})
 
 // Details.displayName = "Details"
 

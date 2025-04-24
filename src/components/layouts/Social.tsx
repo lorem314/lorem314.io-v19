@@ -5,6 +5,8 @@ import { SiCodesandbox } from "react-icons/si"
 import { FaGithub } from "react-icons/fa"
 import { FaBilibili } from "react-icons/fa6"
 
+import Tooltip from "../ui/Tooltip"
+
 const refs = {
   codepen: "https://codepen.io/Number_DDD",
   codesandbox: "https://codesandbox.io/u/lorem314",
@@ -26,15 +28,17 @@ export default function Social() {
         const { Icon, title, href } = link
         return (
           <li key={index}>
-            <a
-              className="bg-misc-button-bg hover:bg-misc-button-hover-bg flex items-center gap-1 rounded p-2 text-white opacity-90 hover:opacity-100 sm:hover:bg-transparent lg:bg-transparent lg:p-0"
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Icon />
-              <span className="hidden lg:inline lg:text-sm">{title}</span>
-            </a>
+            <Tooltip tip={title} placement="bottom">
+              <a
+                className="bg-misc-button-bg hover:bg-misc-button-hover-bg flex items-center gap-1 rounded p-2 text-white opacity-90 hover:opacity-100 sm:hover:bg-transparent lg:bg-transparent lg:p-0"
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Icon />
+                <span className="hidden lg:inline lg:text-sm">{title}</span>
+              </a>
+            </Tooltip>
           </li>
         )
       })}

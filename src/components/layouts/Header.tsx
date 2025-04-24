@@ -21,7 +21,7 @@ export default function Header({
   RightDrawerIcon: IconType | null
 }) {
   return (
-    <header className="bg-primary-color flex h-12.5 items-center justify-between gap-2.5 px-2.5 text-white">
+    <header className="bg-primary-color flex h-12.5 items-center justify-between gap-2.5 px-2.5 text-white transition-colors">
       {hasLeftDrawer ? (
         <button
           className="bg-misc-button-bg hover:bg-misc-button-hover-bg active:bg-misc-button-active-bg rounded p-2"
@@ -39,6 +39,8 @@ export default function Header({
 
       <Social />
 
+      <Theme />
+
       {hasRightDrawer && RightDrawerIcon ? (
         <button
           className="hover:bg-misc-button-hover-bg rounded bg-black/10 p-1.5"
@@ -47,8 +49,6 @@ export default function Header({
           <RightDrawerIcon className="h-5 w-5" />
         </button>
       ) : null}
-
-      <Theme />
     </header>
   )
 }

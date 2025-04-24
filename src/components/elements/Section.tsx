@@ -28,9 +28,11 @@ const Section = (props: SectionProps) => {
 
   return (
     <section>
-      <H id={id} className={`mb-4 font-bold`}>
-        <a href={`#${id}`}>{title}</a>
-      </H>
+      {H ? (
+        <H id={id} className={`mb-4 font-bold`}>
+          <a href={`#${id}`}>{title}</a>
+        </H>
+      ) : null}
 
       {Children.toArray(children).map((child, index) => {
         if (!isValidElement(child)) return child

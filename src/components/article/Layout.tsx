@@ -25,7 +25,8 @@ export default function Layout({
     useContext(GlobalContext)
 
   return (
-    <div
+    <article
+      id="article"
       className={`relative mx-auto my-8 grid max-w-7xl gap-2.5 ${hasRightDrawer ? "grid-cols-[2rem_minmax(0,_auto)]" : "grid-cols-[2rem_minmax(0,_auto)_minmax(0,_24rem)]"}`}
     >
       {/*  */}
@@ -61,6 +62,6 @@ export default function Layout({
       )}
 
       {/*  */}
-    </div>
+    </article>
   )
 }

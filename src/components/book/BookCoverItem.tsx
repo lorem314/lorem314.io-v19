@@ -11,7 +11,7 @@ const BookCoverItem = ({
   bookCover: BookCover
   chapters: BookChapter[]
 }) => {
-  console.log(`${bookCover.title} chapters`, chapters)
+  // console.log(`${bookCover.title} chapters`, chapters)
   return (
     <article>
       <header>

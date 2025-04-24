@@ -11,7 +11,7 @@ import { collectAllTags } from "@/utils"
 
 import type { Tag } from "@/types"
 
-const expectedSearchParams = ["query", "tags"]
+// const expectedSearchParams = ["query", "tags"]
 
 export default async function PageBlogs({
   searchParams,
@@ -19,8 +19,8 @@ export default async function PageBlogs({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
   const allTags = collectAllTags(allBlogPosts)
-  const allTagNames = allTags.map((tag) => tag.name)
-  const awaitedSearchParams = await searchParams
+  // const allTagNames = allTags.map((tag) => tag.name)
+  // const awaitedSearchParams = await searchParams
 
   // console.log("---------------------------------")
 
@@ -31,80 +31,74 @@ export default async function PageBlogs({
   // const tags = awaitedSearchParams.tags
   // const query = awaitedSearchParams.query
 
-  const flag = { shouldRedirect: false }
+  // const flag = { shouldRedirect: false }
 
-  const initSearchParams = Object.entries(awaitedSearchParams).reduce(
-    (prevSearchParams, [key, value]) => {
-      switch (key) {
-        case "tags":
-          if (!expectedSearchParams.includes(key)) {
-            // unknown search param, just leave it
-            flag.shouldRedirect = true
-            return { ...prevSearchParams }
-          }
-          if (!value) {
-            // expected param, but no value, like `q` in `?q=&t=1`
-            flag.shouldRedirect = true
-            return { ...prevSearchParams }
-          } else if (Array.isArray(value)) {
-            // string[] - remove duplicated element
-            const arr = value
-              .join(" ")
-              .split(" ")
-              .filter((tagName) => {
-                const isExpectedTagName = allTagNames.includes(tagName)
-                if (!isExpectedTagName) flag.shouldRedirect = true
-                return isExpectedTagName
-              })
-            const set = new Set(arr)
-            if (arr.length !== set.size) flag.shouldRedirect = true
-            return {
-              ...prevSearchParams,
-              [key]: Array.from(set).join(" "),
-            }
-          } else {
-            // string
-            const arr = value.split(" ").filter((tagName) => {
-              const isExpectedTagName = allTagNames.includes(tagName)
-              if (!isExpectedTagName) flag.shouldRedirect = true
-              return isExpectedTagName
-            })
-            const set = new Set(arr)
-            if (arr.length !== set.size) flag.shouldRedirect = true
-            return {
-              ...prevSearchParams,
-              [key]: Array.from(set).join(" "),
-            }
-          }
-        case "query":
-          // handle multiple cases like `tags`
-          return { ...prevSearchParams, [key]: value }
-        case "mode":
-          return { ...prevSearchParams, [key]: value }
-        default:
-          flag.shouldRedirect = true
-          return { ...prevSearchParams }
-      }
-    },
-    {},
-  )
+  // const initSearchParams = Object.entries(awaitedSearchParams).reduce(
+  //   (prevSearchParams, [key, value]) => {
+  //     switch (key) {
+  //       case "tags":
+  //         if (!expectedSearchParams.includes(key)) {
+  //           // unknown search param, just leave it
+  //           flag.shouldRedirect = true
+  //           return { ...prevSearchParams }
+  //         }
+  //         if (!value) {
+  //           // expected param, but no value, like `q` in `?q=&t=1`
+  //           flag.shouldRedirect = true
+  //           return { ...prevSearchParams }
+  //         } else if (Array.isArray(value)) {
+  //           // string[] - remove duplicated element
+  //           const arr = value
+  //             .join(" ")
+  //             .split(" ")
+  //             .filter((tagName) => {
+  //               const isExpectedTagName = allTagNames.includes(tagName)
+  //               if (!isExpectedTagName) flag.shouldRedirect = true
+  //               return isExpectedTagName
+  //             })
+  //           const set = new Set(arr)
+  //           if (arr.length !== set.size) flag.shouldRedirect = true
+  //           return {
+  //             ...prevSearchParams,
+  //             [key]: Array.from(set).join(" "),
+  //           }
+  //         } else {
+  //           // string
+  //           const arr = value.split(" ").filter((tagName) => {
+  //             const isExpectedTagName = allTagNames.includes(tagName)
+  //             if (!isExpectedTagName) flag.shouldRedirect = true
+  //             return isExpectedTagName
+  //           })
+  //           const set = new Set(arr)
+  //           if (arr.length !== set.size) flag.shouldRedirect = true
+  //           return {
+  //             ...prevSearchParams,
+  //             [key]: Array.from(set).join(" "),
+  //           }
+  //         }
+  //       case "query":
+  //         // handle multiple cases like `tags`
+  //         return { ...prevSearchParams, [key]: value }
+  //       case "mode":
+  //         return { ...prevSearchParams, [key]: value }
+  //       default:
+  //         flag.shouldRedirect = true
+  //         return { ...prevSearchParams }
+  //     }
+  //   },
+  //   {},
+  // )
 
-  console.log("initSearchParams", initSearchParams)
+  // console.log("initSearchParams", initSearchParams)
 
-  if (flag.shouldRedirect) {
-    console.log("should redirect")
-    flag.shouldRedirect = false
-    const params = new URLSearchParams(initSearchParams)
-    redirect(`/blogs?${params.toString()}`)
-  }
+  // if (flag.shouldRedirect) {
+  //   console.log("should redirect")
+  //   flag.shouldRedirect = false
+  //   const params = new URLSearchParams(initSearchParams)
+  //   redirect(`/blogs?${params.toString()}`)
+  // }
 
-  return (
-    <Layout allTags={allTags}>
-      <>
-        <BlogPostList blogPosts={allBlogPosts} />
-      </>
-    </Layout>
-  )
+  return <Layout allBlogPosts={allBlogPosts} allTags={allTags} />
 }
 
 export const metadata: Metadata = {

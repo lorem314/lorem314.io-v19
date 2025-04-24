@@ -33,7 +33,6 @@ export default function PageSetting() {
           id="preferred-theme"
           value={preferredTheme}
           onChange={(event) => {
-            console.log("event", event.target.value)
             setPreferredTheme(event.target.value as PreferedTheme)
           }}
         >
@@ -75,7 +74,7 @@ export default function PageSetting() {
 
       <label
         className="my-2 flex items-center gap-2.5"
-        htmlFor="left-drawer-width-slider"
+        // htmlFor="left-drawer-width-slider"
       >
         <span>左侧抽屉宽度</span>
         <RangeInput

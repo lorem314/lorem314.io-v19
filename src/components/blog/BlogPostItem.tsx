@@ -9,7 +9,7 @@ const BlogPostItem = ({ blogPost }: { blogPost: BlogPost }) => {
   return (
     <article>
       <header>
-        <h3 className="text-lg font-bold">
+        <h3 className="text-link-color text-lg font-bold">
           <Link href={`/blogs/${blogPost.title}`}>{blogPost.title}</Link>
         </h3>
       </header>

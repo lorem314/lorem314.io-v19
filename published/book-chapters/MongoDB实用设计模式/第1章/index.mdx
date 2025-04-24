@@ -4,4 +4,470 @@ title: "嵌入还是引用"
 chapter: 1
 ---
 
-## 嵌入还是引用
+设计一个新的应用程序时，首先要做的是设计数据结构。在像 MySQL 这种关系型数据库中，这一步骤对应为移除表格中的冗余，即**规范化**(normalization)。MongoDB，不同于关系型数据库，通过结构化的**文档**(document)来存储数据。关系型表格要求每个格子只能插入一个单一的数据，MongoDB BSON 文档则允许更加复杂的结构，如数组。
+
+> 原文为 a single, scalar value。此处的 scalar 指一次只能存储一个值的变量。类似的还有 scalar variable, scalar field。
+
+本章主要探索一个问题，一个 MongoDB 交给我们自己来决定的问题——子文档数据应该嵌入到父文档中，还是新建一个文档，在父文档中用 ID 来引用。在此，你将学习如何在做出决定时权衡性能、灵活性和复杂性。
+
+<Section title="关系型数据建模和范式化">
+
+在探究嵌入还是引用这一问题之前，我们先来看一下在关系型数据库中，针对某些类型是如何建模的。在关系型数据库中，数据建模通常把数据结构化为由行和列表示的表格。关系型数据库理论定义了多种**范式**(normal form)来规范化数据到表格的转化。本章不会深入地探讨范式，但有两个范式还是要提一下：第一范式和第三范式。
+
+<Section title="什么是范式">
+
+规范化中首先要做的，是将应用程序中的数据结构转化为**第一范式**(1NF)。第一范式有着严格的定义，但在此，我们先将其简化为一个简单的由行和列构成的表格，每个格子只能存储一个值。而 MongoDB 并没有强求只能存储一个值，从一定程度上也带来了性能提升，我们之后会看到。回到关系型上来，我们来设计一个电话簿程序，可能的数据结构如表格 1-1 中展示
+
+<Table id="1-1" title="电话簿（第 1 版本）">
+  <Thead ths={["ID", "name", "phone_number", "zip_code"]} />
+  <Tbody>
+    <Tr tds={["1", "Rick", "555-111-1234", "30062"]} />
+    <Tr tds={["2", "Mike", "555-222-2345", "30062"]} />
+    <Tr tds={["3", "Jenny", "555-333-3456", "01209"]} />
+  </Tbody>
+</Table>
+
+这种数据结构已经符合了第一范式。现在来加一个条件，我们希望能像表格 1-2 中所示的，存储多个用户的电话 `phone_number`。
+
+<Table id="1-2" title="电话簿（第 2 版本）">
+  <Thead ths={["ID", "name", "phone_number", "zip_code"]} />
+  <Tbody>
+    <Tr tds={["1", "Rick", "555-111-1234", "30062"]} />
+    <Tr tds={["2", "Mike", "555-222-2345; 555-212-2322", "30062"]} />
+    <Tr tds={["3", "Jenny", "555-333-3456; 555-334-3411", "01209"]} />
+  </Tbody>
+</Table>
+
+这种数据结构就不再符合第一范式了。若是真要以如上的方式将数据存储到关系型数据库中，我们不得不考虑是将 phone_number 存储为非结构化的 BLOB 字符格式，还是再新开辟一列（即 phone_number0, phone_number1）。假设我们用字符的方式存储，在查询给定号码的用户姓名时，查询字符串会是如下这样：
+
+```sql
+SELECT name
+FROM contacts
+WHERE phone_numbers LIKE '%555-222-2345%'
+```
+
+不幸的是，使用不是前缀的 LIKE 语句意味着该查询需要全表扫描。
+
+再来看另一种方式，新开辟一列 phone_number1，如表格 1-3：
+
+<Table id="1-3" title="电话簿（第 2.1 版本）（多列）">
+  <Thead ths={["ID", "name", "phone_number0", "phone_number1", "zip_code"]} />
+  <Tbody>
+    <Tr tds={["1", "Rick", "555-111-1234", "NULL", "30062"]} />
+    <Tr tds={["2", "Mike", "555-222-2345", "555-212-2322", "30062"]} />
+    <Tr tds={["3", "Jenny", "555-333-3456", "555-334-3411", "01209"]} />
+  </Tbody>
+</Table>
+
+这种情况下，查询变得健壮了许多：
+
+```sql noLineNumber
+SELECT name
+FROM contacts
+WHERE phone_number0 = '555-222-2345'
+    OR phone_number1 = '555-222-2345';
+```
+
+但更新就变得麻烦了许多，尤其是删除某个特定的号码，我们需要在两个列中定位指定的 phone_number，再将其重写或设为 NULL。第一范式通过将多个号码分为多行来解决该问题，如表格 1-4：
+
+<Table id="1-4" title="电话簿（第 3 版本）">
+  <Thead ths={["ID", "name", "phone_number", "zip_code"]} />
+  <Tbody>
+    <Tr tds={["1", "Rick", "555-111-1234", "30062"]} />
+    <Tr tds={["2", "Mike", "555-212-2322", "30062"]} />
+    <Tr tds={["2", "Mike", "555-222-2345", "30062"]} />
+    <Tr tds={["2", "Jenny", "555-334-3411", "01209"]} />
+    <Tr tds={["2", "Jenny", "555-333-3456", "01209"]} />
+  </Tbody>
+</Table>
+
+该表格又符合第一范式了，但同时我们也引入了一些冗余。同于的缺点在于，潜在的不连贯性，即同一部分数据有着不同的值。为了移除这些冗余，我们需要进一步将表分为两部分：Table1-5 和 table 1-6。（别着急，我们很快便会讲到 MongoDB 是如何不用范式来解决冗余问题的）
+
+<Table id="1-5" title="电话簿（第 4 版本）(contacts)">
+  <Thead ths={["contact_id", "name", "zip_code"]} />
+  <Tbody>
+    <Tr tds={["1", "Rick", "30062"]} />
+    <Tr tds={["2", "Mike", "30062"]} />
+    <Tr tds={["3", "Jenny", "01209"]} />
+  </Tbody>
+</Table>
+
+<Table id="1-6" title="电话簿（第 4 版本）(numbers)">
+  <Thead ths={["contact_id", "phone_number"]} />
+  <Tbody>
+    <Tr tds={["1", "555-111-1234"]} />
+    <Tr tds={["2", "555-212-2322"]} />
+    <Tr tds={["2", "555-222-2345"]} />
+    <Tr tds={["3", "555-334-3411"]} />
+    <Tr tds={["3", "555-333-3456"]} />
+  </Tbody>
+</Table>
+
+我们需要一组主键，来在两个表格之间创建联系。在表格 1-5 和表格 1-6 所示的数据中，contact_id 作为 contacts 表中的主键，而 contact_id 和 phone_number 两者组成了 numbers 表中的主键。至此，我们又成功地删除了冗余，可以只针对 name、zip_code 或 phone_numbers 其中之一进行更新，而无需考虑多行更新，即数据模型中没有了**不连贯性(inconsistency)**。
+
+</Section>
+
+<Section title="问题所在">
+
+如上所言，规范化的目的在于使更新信息的操作更简单。每次更新只会涉及到一个单元格中的数值变动。但当我们做查询时，问题又来了。例如，我们希望展示某人的所有手机号码。此时，关系型数据库会不得不用到 `JOIN` 查询：
+
+```sql noLineNumber
+SELECT name, phone_number
+FROM contacts LEFT JOIN numbers
+    ON contacts.contact_id = numbers.contact_id
+WHERE contacts.contact_id = 3;
+```
+
+该查询的结果如表格 1-7 所示
+
+<Table id="1-7" title="JOIN查询结果">
+  <Thead ths={["name", "phone_number"]} />
+  <Tbody>
+    <Tr tds={["Jenny", "555-333-3456"]} />
+    <Tr tds={["Jenny", "555-343-3411"]} />
+  </Tbody>
+</Table>
+
+数据库也确实返回了完成的信息。问题在于数据库得到这组信息的过程，尤其数据库所部署的服务器上使用了旋转磁盘。为了解原因，我们需要简单概括一下这种设备的物理属性。
+
+> 固态硬盘(Solid State Drive, SSD)：固态驱动器是非易失性存储器 (NVM) 计算机硬件，无需移动部件即可存储数据。
+
+> 机械硬盘(Hard Disk Drive, HDD)：机械硬盘使用旋转磁盘和机械写入头来处理数据，而 SSD 使用半导体中的电荷。
+
+机械硬盘在寻找数据的位置上所花费的时间，远比它读取数据花费的时间要多（<a href="#图片1-1">图片 1-1</a>）。例如，一张现代硬盘可能需要花费 5 毫秒(ms, 10^-3s)来找到数据在硬盘上的位置。当可以读取时，假设以 40-80MB 每秒的速度读取，电话簿表每行 1024bytes，那么，读取一行信息大概需要 12-25 微秒(μs, 10^-6s)。
+
+<Figure
+  id="1-1"
+  src="/books/MongoDB实用设计模式/第1章/图片1-1_硬盘查找VS连续访问.png"
+  title="硬盘查找VS连续访问"
+/>
+
+总的算下来，寻找数据大致占据了整体时间的 99%。考虑到磁盘访问时，随机查找更不可取。而 `JOIN` 操作正包含随机查找。以如上的规范化后的表格为例，可总结为如下的 Python 代码：
+
+```python
+for number_row in find_by_contact_id(numbers, 3):
+    yield (contact_row.name, number_row.number)
+```
+
+每个联系人至少会生成一个磁盘查找。代码中，我们没有具体解释 `find_by_contact_id` 如何工作，假设其只需要一趟磁盘查找。通常，这只需要读取 numbers 表中 contact_id 的索引，潜在地需要更多的磁盘查询。
+
+当然，现在数据库系统会通过缓存常用数据来优化上述过程。然而，即使有了优化，连接表查询仍是关系型数据库中比较昂贵的操作。另外，若之后需要将服务器分布化，则有可能需要更昂贵和耗时的分布式连接表查询。
+
+</Section>
+
+<Section title="反范式化以提高性能">
+
+在设计好了符合第 n 范式的表后，我们会针对可能会经常执行的 JOIN 操作，对表进行反范式化。
+
+这种情况下，我们允许在存储 name 和 contact_id 时存在冗余。当然，这样做会令我们试图摆脱的冗余使应用程序更加复杂，因为我们必须确保更新所有冗余位置的数据。
+
+</Section>
+
+</Section>
+
+<Section title="MongoDB:早就不用范式化了">
+
+MongoDB 中的数据可以不以表格的形式存储，或者说，摒弃了规范化，直接从第一范式开始。在 MondoDB 中，数据以**文档**(document)的形式存储。关系型数据库中需要遵循，每个单元格只能存储一个数据这一规则，而 MondoDB 中，可以通过数组存储多个数据。
+
+幸运的是，这对于应用程序设计者来说，在**模式**(schema)设计上开辟了新的可能。MongoDB 支持多值，我们能在不用担心冗余的情况下，享受到很多反范式设计下的性能提升。但又不幸的是，这又会复杂化模式设计。不同于在设计关系型数据库时可以遵循范式，MongoDB 中没有这种可以遵循的标准，大多数情况下的答案都是“看情况”。
+
+<Section title="MongoDB 文档格式">
+
+在谈论何时、为何使用 MongoDB 中的数组类型之前，我们先来解释什么是文档。MongoDB 中的文档使用 JSON(JavaScript Object Notation)格式，但实际存储时使用 BSON(Binary JSON)。简单来说，MongoDB 中的文档是一组键值对，值可以是以下类型之一：
+
+- 原始 JSON 类型（数字，字符串，布尔）
+- 原始 BSON 类型（datetime，ObjectId，UUID，regex）
+- 数组
+- 由键值对组成的 Object
+- Null
+
+在我们的电话簿程序中，Jenny 的联系信息在 MongoDB 中可以表示为：
+
+```json
+{
+  "_id": 3,
+  "name": "Jenny",
+  "zip_code": "01209",
+  "numbers": ["555-333-3456", "555-334-3411"]
+}
+```
+
+如你所见，我们可以按照表格 1-2 中的格式存储信息，而又不必考虑规范化。另外，我们也可以通过范式化来消除数组：
+
+```json
+// Contact document:
+{
+  "_id": 3,
+  "name": "Jenny",
+  "zip_code": "01209"
+}
+
+// Number documents:
+{ "contact_id": 3, "number": "555-333-3456" }
+{ "contact_id": 3, "number": "555-334-3411" }
+```
+
+</Section>
+
+<Section title="出于数据完整性而使用嵌入">
+
+如果想在一对多的数据关系中保持数据本地化，最好使用嵌入。如同之前讨论的，机械硬盘擅长顺序数据传输，不擅长随机查找。由于 MongoDB 将文档在硬盘上连续存储，这意味着，将一次查找所需的数据都存储在一个文档中，可以避免多次硬盘查找。
+
+出于让数据库的分区更加简便，MongoDB 中没有 `JOIN` 这类操作。例如，若是在电话簿程序中使用引用，则可能的操作如下：
+
+```python
+contact_info = db.contacts.find_one({'_id': 3})
+number_info = list(db.numbers.find({'contact_id': 3}))
+```
+
+若采取如上操作，结果可能会比使用 `JOIN` 更糟。数据库不仅需要多次查找才能找到我们所需的数据，由于代码的写法，我们还引入了另外的延迟，使得需要两次轮回才能找到数据。因此，若在获取某个联系人的信息时，也总是需要其电话号码，那么此时最好使用嵌入。
+
+</Section>
+
+<Section title="出于操作原子性和数据隔离而使用嵌入">
+
+另一种会使用嵌入的情况是，写入数据时的原子性和隔离性。在更新数据时，我们总是希望操作整体不是成功就是失败，而不是只成功了一部分。关系型数据库通过**事务(transaction)**操作来实现。例如，我们想删除 Jenny 的信息，类似的代码如下：
+
+```sql
+BEGIN TRANSACTION;
+DELETE FROM contacts WHERE contact_id=3;
+DELETE FROM numbers WHERE contact_id=3;
+COMMIT;
+```
+
+问题是，MongoDB 中没有设计类似的操作。若想删除已被范式化的 Jenny 的信息，代码如下：
+
+```js
+db.contacts.remove({ _id: 3 })
+db.numbers.remove({ contact_id: 3 })
+```
+
+<aside>
+  🐾 **为何没有事务操作？**
+  MongoDB的设计意图在于能够简单地为分布式服务进行扩展。而分布式数据库地两大问题，一是分布式连接查询，二是分布式事务。两种操作实现起来都很困难，在服务器不可达时，可能会导致性能问题。为了在不支持`JOIN`操作和多文档事务的情况下解决该难题，MongoDB能够自动地通过分片方案来达到此目的，同时这种操作要比关系型`JOIN`和事务操作更易扩展，且性能更加。
+</aside>
+
+这种情况下，Jenny 的信息有可能已从 contacts 中删除，但电话号码还留在 numbers 中，在这之间，其他程序也有可能来对 Jenny 的信息进行访问。另一方面，使用嵌入模式，我们只需要一次操作，就能删除 Jenny 在数据库中的所有信息。
+
+```js
+db.contacts.remove({ _id: 3 })
+```
+
+<aside>
+  🐾
+  有趣的是，许多关系数据库系统放宽了事务之间完全隔离的要求，引入了各种隔离级别。
+  因此，如果您可以将更新结构化为仅单文档更新，则可以获得序列化（最保守）隔离级别的效果，而不会影响关系数据库系统中的任何性能。
+</aside>
+
+</Section>
+
+<Section title="出于数据灵活性而使用引用">
+
+在多种情况下，嵌入提供了最好的性能和数据连续性。然而，在某些情况下，范式化的模型工作得更好。若是分为多个文档得情况下，能够给查询带来灵活性，那么应使用引用。
+
+例如，一个存储了博客和评论的数据库。使用嵌入式的情况如下：
+
+```json
+{
+  "_id": "First Post",
+  "author": "Rick",
+  "text": "This is my first post",
+  "comments": [
+    { "author": "Stuart", "text": "Nice post!" }
+    // ...
+  ]
+}
+```
+
+尽管这种存储方式也能在展示博客文章和评论时正常工作，但考虑到筛选某个用户的所有评论这一操作，查询语句如下：
+
+```js
+db.posts.find({ "comments.author": "Stuart" }, { comments: 1 })
+```
+
+结果如下：
+
+```json
+{
+  "_id": "First Post",
+  "comments": [
+    { "author": "Stuart", "text": "Nice post!" },
+    { "author": "Mark", "text": "Dislike!" }
+  ]
+},
+{
+  "_id": "Second Post",
+  "comments": [
+    { "author": "Danielle", "text": "I am intrigued" },
+    { "author": "Stuart", "text": "I would like to subscribe" }
+  ]
+}
+```
+
+主要的缺陷是，我们传回了很多用不到的数据。详细的说，无法只获取 Stuart 的评论，我们将不得不找到所有 Stuart 评论过的博客，同时还包含其他人的评论。我们将不得不进行二次筛选：
+
+```python
+def get_comments_by(author):
+  for post in db.posts.find({'comments.author': author }, {'comments': 1 }):
+    for comment in post['comments']:
+      if comment['author'] == author:
+        yield post['_id'], comment
+```
+
+另一方面，假设我们使用规范化的模型：
+
+```js
+// db.posts schema
+{
+  "_id": "First Post",
+  "author": "Rick",
+  "text": "This is my first post"
+}
+
+// db.comments schema
+{
+  "_id": ObjectId(...),
+  "post_id": "First Post",
+  "author": "Stuart",
+  "text": "Nice post!"
+}
+```
+
+获取所有 Stuart 的评论的查询语句非常直截了当：
+
+```js
+db.comments.find({ author: "Stuart" })
+```
+
+通常，程序的查询模式易于预测，且只通过一种方式访问，无疑嵌入是最好的。另外，若程序会从不同的角度对数据进行查询，或是无法预料数据会如何被查询，那么规范化的模型会更好。例如，在链式模式中，我们可以针对感兴趣的评论进行排序，或是用 limit、skip 等对返回的评论进行限制，但在嵌入模式中，我们只能望洋兴叹了。
+
+</Section>
+
+<Section title="出于潜在的高数量关系而使用引用">
+
+另一个适合将数据规范化，通过引用建立联系的场景是，在处理高元或不可预测的一对多关系时。例如，一个有着大量读者的博客下面通常会有成百上千条评论。这种情况下，使用嵌入的效果非常不好。
+
+- 文档越大，消耗内存就越大
+- 逐渐增大的文档最终会被复制到更大的空间
+- MongoDB 的文档被限制在 16MB 之内
+
+> In logic, mathematics, and computer science, arity (/ˈærɪti/ ( listen)) is **the number of arguments or operands taken by a function, operation or relation**. In mathematics, arity may also be called rank, but this word can have many other meanings. In logic and philosophy, arity may also be called adicity and degree.
+
+内存可是 MongoDB 服务器上最要紧的资源。尤其是将经常访问的数据存储到内存中时，数据越大，能存的就越少。RAM 中的文档越少，服务器检索文档时页面错误的可能性就越大，最终页面错误导致随机磁盘 I/O。
+
+在之前的博客数据库中，我们可以设计为默认只显示前三条评论。每次读取博客时都跟着 500 条评论，大多数情况下都只是在浪费内存。
+
+其次，文档的增长需要被拷贝，这会牵扯到更新操作的性能。随着将新评论不断地以嵌入形式添加到 comments 中，MongoDB 最终会不得不将整个文档移动到有更大空间的地方。该移动过程一旦开始，将会严重放慢更新操作的性能。
+
+最后，关于 MongoDB 文档的大小限制，若是一对多关系中潜在地对应着无限多的数量，则很有可能会把空间消耗完，导致无法发布新的评论。虽然这非常值得注意，但在达到 16 MB 大小限制之前，通常会因内存压力和文档复制而遇到问题。
+
+</Section>
+
+<Section title="多对多关系">
+
+最后一个可能考虑会用到引用的情况是多对多关系。例如，假设我们有一个存储产品和类别的电子商务系统。每个产品可以有多个类别，每个类别也可以有多个产品。模仿多对多关系模型，使用 join collection
+
+```js
+// db.product schema
+{ "_id": "My Product", ... }
+
+// db.category schema
+{ "_id": "My Category", ... }
+
+// db.product_category schema
+{
+  "_id": ObjectId(...),
+  "product_id": "My Product",
+  "category_id": "My Category"
+}
+```
+
+这种做法能很好的将模型规范化，查询时会执行很多程序级别的 join 操作：
+
+```python
+def get_product_with_categories(product_id):
+    product = db.product.find_one({"_id": product_id})
+    category_ids = [
+      p_c['category_id']
+      for p_c in db.product_category.find(
+        { "product_id": product_id }) ]
+    categories = db.category.find({
+      "_id": { "$in": category_ids } })
+    return product, categories
+```
+
+获取类别以及其对应的产品也同样很复杂。另外，我们也可以尝试以下嵌入：
+
+```js
+// db.product schema
+{
+  "_id": "My Product",
+  "categories": [
+    { "_id": "My Category", ... },
+    ...
+  ]
+}
+
+// db.category schema
+{
+  "_id": "My Category",
+  "products": [
+    { "_id": "My Product", ... },
+    ...
+  ]
+}
+```
+
+此时的查询会变得简单一些：
+
+```python
+def get_product_with_categories(product_id):
+  return db.product.find_one({"_id": product_id})
+```
+
+当然，产品和类别的更新操作将不得不对其所有出现过的地方进行操作：
+
+```python
+def save_product(product):
+  db.product.save(product)
+  db.category.update(
+    { 'products._id': product['_id'] },
+    { '$set': { 'products.*': product } },
+    multi=True
+  )
+```
+
+对于多对多关系，妥协的方法往往是最好的，将 `_id` 值进行嵌入而非整个文档。
+
+```js
+// db.product schema
+{ "_id": "My Product",
+ "category_ids": [ "My Category", ... ] }
+// db.category schema
+{ "_id": "My Category" }
+```
+
+此时，获取产品信息的代码虽然看起来稍微复杂了一些，但避免了更新产品信息时，找出该产品在类别中所有曾出现
+过的地方这一麻烦操作了。
+
+```python
+def get_product_with_categories(product_id):
+ product = db.product.find_one({"_id": product_id})
+ categories = list(db.category.find({
+ '_id': {'$in': product['category_ids']} }))
+ return product, categories
+```
+
+</Section>
+
+</Section>
+
+<Section title="结论">
+
+与其说是一种科学，MongoDB 中的模式设计更像是一种艺术。是在一对多关系中，以子文档的方式嵌入到父文档中；还是选择通过 `_id` 值，以一种更关系型的方式在父文档中被引用，是早期设计中需要进行决策的。
+
+以子文档的方式嵌入的两大益处是，数据本地性和数据更新时的原子性。享受这些益处意味着不得不在灵活性上做出妥协，嵌入意味着文档已经预先连接在了一起，面对多元关系时会引起问题。
+
+最终，决定取决于应用程序的访问模式，MongoDB 中的硬性规定少于关系数据库中的规定。 明智地使用 MongoDB 为您提供的模式设计灵活性将帮助您充分利用这个强大的非关系数据库。
+
+</Section>

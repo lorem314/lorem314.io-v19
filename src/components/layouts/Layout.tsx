@@ -133,7 +133,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       )}
 
       <main
-        className={`absolute top-12.5 right-0 bottom-0 overflow-auto px-2.5`}
+        id="page-container"
+        className={`bg-bg-0 absolute top-12.5 right-0 bottom-0 overflow-auto px-2.5 transition-colors`}
         style={{ left: hasLeftDrawer ? "0" : `${leftDrawerWidth}px` }}
       >
         {children}

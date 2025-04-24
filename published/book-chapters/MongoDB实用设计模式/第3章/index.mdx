@@ -1,0 +1,358 @@
+---
+isbn: "978-1-449-34004-9"
+title: "模拟转账行为"
+chapter: 3
+---
+
+关系型数据库通常依赖于原子性多语句事务，如在 `BEGIN TRANSACTION;` 和 `COMMIT;` 中插入多条语句，来确保数据更新的一致性：要么其中的语句全部都被应用，要么全部都不被应用。若是想让处于不同服务器上的关系型数据库中的数据保持更新一致，必须使用两阶段提交协议，这种方法会显著降增加任务耗时。反观 MongoDB，压根儿就没有原子性多文档事务这类概念，那么问题来了：在 MongoDB 中，要如何保证数据更新的一致性呢？
+
+在本章中，我们将探讨 MongoDB 中的文档模型和原子更新操作。我们还将探究如何使用一种被称为“补偿”的方法来模拟关系型数据库中的事务行为。
+
+<Section title="关系型数据库中达成数据一致性的方法">
+
+关系型数据库中的库表，要遵循范式化的一个目的是，将原子更新维持在一条 SQL 语句中，从而维持数据模型的域一致性。尽管范式化库表在使数据保持一致性方面很有成效，但有些类型的一致性，很难或是不可能只用一条 SQL 语句表达出来：
+
+- 在一对多关系中，删除“一”表中的某行时，也应该删除“多”表中与其相关的多个行。例如，删除一个订单，也应该删除所有从属于该订单的另一个表中的所有行。
+- 假设总价存储在订单表中，调整订单表中某个商品的购买数量时，应同时更新订单总价。
+- 在银行转账中，买家的账户扣款和卖家的账户收款应保持数据一致性，要么都更新，要么都不更新。
+
+{/* Additionally, other simultaneous transactions should not see the data in an incomplete state where either the debit or credit has not yet completed. */}
+
+为了解决此类情况，关系型数据库使用多语句事务，来进行数据的原子更新，要么所有的更新语句都通过 COMMIT 成功更新，要么所有的语句都通过 ROLLBACK 失败并回滚。这种方式的缺点是，若使用的是分布式架构，更新速度可能会非常的慢。然而，还是可以使用分两阶段提交的方式，来确保多个服务器中的数据保持一致，总结如下：
+
+{/* 是需要更新的表分别位于不同的物理服务器上，即 */}
+
+1. 在每个服务器上都“准备”好执行事务操作。在此阶段，所有更新都会被计算好，并保证在每个服务器的内部不会出现数据不一致。
+2. 所有的服务器都执行完了“准备”阶段后，每个服务器开始应用各自的更新事务。
+
+由于要保证准备阶段完成后能够执行事务，数据库需要在准备阶段一开始给表加上一个锁，锁要在所有其他服务器执行完准备阶段前保持，这可能是一个很“漫长”的过程。
+
+MongoDB，从设计之初就着眼于分布式操作，它通过弃用了多文档事务的概念绕过了这个问题。在 MongoDB 中，文档的每次更新都是独立的。
+
+</Section>
+
+<Section title="复合文档">
+
+MongoDB 将文档模型和更新操作相结合，实现了类似关系型数据库中的事务操作。考虑以下场景，从订单表中删除一行，同时也需要将订单商品表中删除所有与该订单有关的行。在关系型数据库中，代码如下：
+
+```sql
+BEGIN TRANSACTION;
+DELETE FROM orders WHERE id='11223';
+DELETE FROM order_items WHERE order_id='11223';
+COMMIT;
+```
+
+考虑到诸如此类的删除操作很常见，很多关系型数据库在创建表时都能进行级联约束，以便于自动执行删除。例如，在创建 orders 表时，添加删除的级联约束：
+
+```sql
+CREATE TABLE `orders` (
+  `id` CHAR(5) NOT NULL,
+  -- ...
+  PRIMARY KEY(`id`)
+)
+
+CREATE TABLE `order_items` (
+  `order_id` CHAR(5) NOT NULL,
+  `sku` CHAR(8) NOT NULL,
+  -- ...
+  PRIMARY KEY(`order_id`, `sku`),
+  FOREIGN KEY(`order_id`) REFERENCES orders.id ON DELETE CASCADE
+)
+```
+
+这样，删除语句就变得简单多了：
+
+```sql
+DELETE FROM orders WHERE id='11223';
+```
+
+然而，尽管我们并没有明着写出 BEIGIN 和 COMMIT 关键字，数据库在执行这段代码时，内部用的还是完整的多表事务操作。
+
+一个习惯了关系型数据库，刚开始使用 MongoDB 的开发者，可能仍然会用关系型的思维方式来设计集合：
+
+```js
+// "orders" document
+{
+ _id: '11223',
+ ...
+}
+
+// "order_items" document
+{
+ _id: ObjectId(...),
+ order_id: '11223',
+ sku: '...',
+ ...
+}
+```
+
+这种情况下，在删除订单时，以下的代码是非原子性更新，并不能保证数据的一致性：
+
+```js
+db.orders.remove({ _id: "1123" })
+db.order_items.remove({ order_id: "11223" })
+```
+
+若是在执行完第二个 remove 语句之前抛出错误，就会在数据库中留下没有对应 order_id 的订单物品(order_item)。其他程序也有可能在这两个 remove 语句之间进行查询，这样则会得到没有父文档的子文档。或者，我们可以将两个语句兑换位置：
+
+```js
+db.order_items.remove({ order_id: "11223" })
+db.orders.remove({ _id: "1123" })
+```
+
+这种情况下抛出错误，虽然不会产生“孤儿”子文档，但本应该被删除的订单文档（父文档）仍然存在。更好的方法是将订单商品直接嵌入到订单文档中：
+
+```js
+// "orders" document
+{
+  _id: '11223',
+  ...
+  items: [
+    { sku: '...', ... },
+    { sku: '...', ... },
+    ...
+  ]
+}
+```
+
+此时，删除订单只需要一行简单的代码了：
+
+```js
+db.orders.remove({ _id: "1123" })
+```
+
+</Section>
+
+<Section title="使用复杂更新">
+
+尽管在 MongoDB 中使用文档嵌入，能使在关系型数据库中使用事务来完成的操作，变得相对简单。但有些情况下，我们仍需要编写复杂的代码。还用之前的订单表举例子，假设我们想在订单表中存储每件商品的总价，和订单的总价，设计的文档模型如下：
+
+```js
+// "orders" document
+{
+  _id: '11223',
+  total: 500.94,
+  // ...
+  items: [
+    { sku: '123', price: 55.11, qty: 2 },
+    { sku: '...', /*...*/ },
+    // ...
+  ]
+}
+```
+
+假设我们想将 sku 为 123 的订单商品的数量从 2 改为 3。一种较为天真的做法是，从数据库中读取文档，在内存中更新，再保存。不幸的是，这种做法会在加载订单和保存之间引入“竞争条件”。我们需要一种无需在客户端程序代码中执行的原子更新的方法。我们可以使用 MongoDB 中的原子更新操作来实现：
+
+```python
+def increase_qty(order_id, sku, price, qty):
+  total_update = price * qty
+  while True:
+    db.orders.update(
+      { '_id': order_id, 'items.sku': sku },
+      { '$inc': { 'total': total_update, 'items.$.qty': qty } }
+    )
+```
+
+这种情况下，仍然可能会有另一个操作删除了我们项进行更新的订单的可能性（可能是在另一个浏览器标签页中）。为了解决这种情况，我们需要检查返回值来检测更新是否成功。如果失败，肯定是有另一个操作删除了该项目，我们需要用该项目和新数量一起再 `$push` 到数组中：
+
+```python
+def increase_qty(order_id, sku, price, qty):
+  total_update = price * qty
+  while True:
+    result = db.orders.update(
+      { '_id': order_id, 'items.sku': sku },
+      { '$inc': { 'total': total_update, 'items.$.qty': qty } }
+    )
+    if result['updatedExisting']: break
+    result = db.orders.update(
+      { '_id': order_id, 'items.sku': { '$ne': sku } },
+      {
+        '$inc': { 'total': 110.22 },
+        '$push': { 'items': { 'sku': sku, 'qty': qty, 'price': price } }
+      }
+    )
+    if result['updatedExisting']: break
+```
+
+</Section>
+
+<Section title="用补偿方法执行乐观更新">
+
+在某些情况下，只用 MongoDB 中的一条 update 语句无法完成更新操作。例如账户转账，我们必须同时更新两个文档，并保证数据一致性。这种情况下，只能执行多次更新，但需要考虑到所有可能出错的可能，来保持两个文档的数据一致。一种天真的做法是，将账户余额存储在用户文档中，然后分别进行更新。这种设计下，文档会很简洁：
+
+```js
+{ _id: 1, balance: 100 }
+{ _id: 2, balance: 0 }
+```
+
+进行更新的代码也同样很简洁：
+
+```python
+def transfer(amt, source, destination):
+  result = db.accounts.update(
+    { '_id': source, 'balance': { '$gte': amt } },
+    { '$inc': { 'balance': -amt } }
+  )
+  if not result['updatedExisting']:
+    raise InsufficientFundsError(source)
+    db.accounts.update(
+      { '_id': destination },
+      { '$inc': { 'balance': amt } }
+    )
+```
+
+这样写的问题是，若是在买家付款和卖家收款之间抛出错误，卖家就收不到款了。
+
+<blockquote>
+
+在设计应用程序级别、设计到两阶段提交方式的程序时，要格外小心。很容易就会因为没有考虑全所有的可能性而导致没有处理特定的错误，从而导致数据库中的数据不一致。从设计角度来讲，应尽量将所有的更新操作都限制在一个文档中，知道万不得已，才应选择使用两阶段提交的方式更新。
+
+</blockquote>
+
+一种更好的解决方案是，在数据模型中模拟事务。我们可以单独创建一个事务集合，用于存储所有未完成的转账和其当前的状态：
+
+- 处于 new 状态，没有在规定时间内完成的交易，会被回滚。
+- 任何处于 committed 状态的交易，最终会被删除。
+- 任何处于 rollback 状态的交易，最终会被保留。
+
+该事务集合存储的文档模型如下：
+
+```js
+{
+  _id: ObjectId(...),
+  state: 'new',
+  ts: ISODateTime(...),
+  amt: 55.22,
+  src: 1,
+  dst: 2
+}
+```
+
+同时，账户文档也需要做出一些调整，添加 `txns` 属性用于保存当前账户正在进行的转账 ID。
+
+```js
+{ _id: 1, balance: 100, txns: [] }
+{ _id: 2, balance: 0, txns: [] }
+```
+
+最顶层的 transfer 函数还是和以前一样，将金额从一个账户转向另一个账户，但我们需要添加交易的时间限制，如果交易时间过长，该交易最终将会被一个周期性执行的脚本进行回滚：
+
+```python
+def transfer(amt, source, destination, max_txn_time):
+  txn = prepare_transfer(amt, source, destination)
+  commit_transfer(txn, max_txn_time)
+```
+
+注意在如上代码中，我们采用了两阶段提交模式来完成转账：首先账户准备转账，然后执行交易。`prepare_transfer` 函数的代码如下：
+
+```python
+def prepare_transfer(amt, source, destination):
+    # Create a transaction object
+    now = datetime.utcnow()
+    txnid = ObjectId()
+    txn = {
+        "_id": txnid,
+        "state": "new",
+        "ts": datetime.utcnow(),
+        "amt": amt,
+        "src": source,
+        "dst": destination,
+    }
+    db.transactions.insert(txn)
+
+    # "Prepare" the accounts
+    result = db.accounts.update(
+        {"_id": source, "balance": {"$gte": amt}},
+        {"$inc": {"balance": -amt}, "$push": {"txns": txn["_id"]}},
+    )
+    if not result["updatedExisting"]:
+        db.transaction.remove({"_id": txnid})
+        raise InsufficientFundsError(source)
+    db.accounts.update(
+        {"_id": dest},
+        {"$inc": {"balance": amt}, "$push": {"txns": txn["_id"]}},
+    )
+    return txn
+```
+
+这里有两个关键的地方需要注意：
+
+- 账户文档中新增了 txns 用于存储未完成的转账。这使得我们能够在账户文档中确认每个转账的状态。
+- 转账必须在规定时间内完成。若没有，一个周期性执行的脚本会根据转账的状态将其回滚或删除。这可以处理程序或数据库在事务进行的过程中崩溃的情况。
+
+下面是用于提交转账的代码：
+
+```python
+def commit_transfer(txn, max_txn_time):
+    # Mark the transaction as committed
+    now = datetime.utcnow()
+    cutoff = now - max_txn_time
+    result = db.transaction.update(
+        {"_id": txnid, "state": "new", "ts": {"$gt": cutoff}},
+        {"$set": {"state": "commit"}},
+    )
+    if not result["updatedExisting"]:
+        raise TransactionError(txn["_id"])
+    else:
+        retire_transaction(txn["_id"])
+```
+
+该函数的主要目的是，执行转账的原子更新，并将转账的状态由 new 改为 commit。如果更新成功，该文档最终会被脚本删除；即使更新之后马上发生了崩溃，为撤销事务，我们使用下面的函数：
+
+```python
+def retire_transaction(txn_id):
+    db.accounts.update(
+        {"_id": txn["src"], "txns._id": txn_id}, {"$pull": {"txns": txn_id}}
+    )
+    db.accounts.update(
+        {"_id": txn["dst"], "txns._id": txn["_id"]},
+        {"$pull": {"txns": txn_id}},
+    )
+    db.transaction.remove({"_id": txn_id})
+```
+
+注意，函数 `retire_transaction` 是幂等的：使用相同的 txn_id 多次执行和只执行一次该函数的效果是相同的。这意味着，若是在从账户中移除事务前任何时间点发生崩溃，后续的清理进程仍可以通过再次调用该函数来终止该事务。
+
+下面是用于处理超时事务、或是在定期清苦任务中，提交或回滚过程中崩溃的事务：
+
+```python
+def cleanup_transactions(txn, max_txn_time):
+    # Find & commit partially-committed transactions
+    for txn in db.transaction.find({"state": "commit"}, {"_id": 1}):
+        retire_transaction(txn["_id"])
+
+    # Move expired transactions to 'rollback' status:
+    cutoff = now - max_txn_time
+    db.transaction.update(
+        {"_id": txnid, "state": "new", "ts": {"$lt": cutoff}},
+        {"$set": {"state": "rollback"}},
+    )
+    # Actually rollback transactions
+    for txn in db.transaction.find({"state": "rollback"}):
+        rollback_transfer()
+```
+
+最后，对于想要进行回滚的转账，需要更新账户的 txns 属性，并删除转账集合中的对应文档：
+
+```python
+def rollback_transfer(txn):
+    db.accounts.update(
+        {"_id": txn["src"], "txns._id": txn["_id"]},
+        {"$inc": {"balance": txn["amt"]}, "$pull": {"txns": {"_id": txn["_id"]}}},
+    )
+    db.accounts.update(
+        {"_id": txn["dst"], "txns._id": txn["_id"]},
+        {"$inc": {"balance": -txn["amt"]}, "$pull": {"txns": {"_id": txn["_id"]}}},
+    )
+    db.transaction.remove({"_id": txn["_id"]})
+```
+
+需要特别注意的是，上述代码仅当在 txn_id 被存储在账户的 txns 数组中的情况下，才会撤销该交易。这使得回滚也具有幂等性。
+
+</Section>
+
+<Section title="总结">
+
+工具集的约束有助于定义解决问题的模式。就 MongoDB 而言，其中一个约束是缺乏原子多文档更新操作。我们在 MongoDB 中用于弥补原子多文档更新操作不足的模式包括：文档嵌入和用于基本操作的复杂更新；以及用于真正需要两阶段提交协议时提供的带补偿的乐观更新。在设计使用 MongoDB 的应用程序时，与关系数据库相比，你必须牢记哪些更新需要原子化，并相应地设计你的架构。
+
+</Section>

@@ -6,6 +6,8 @@ import { RiArticleFill } from "react-icons/ri"
 import { FaBook } from "react-icons/fa"
 import { RiSettings3Fill } from "react-icons/ri"
 
+import Tooltip from "../ui/Tooltip"
+
 const routes = [
   { Icon: FaHome, title: "主页", href: "/" },
   { Icon: RiArticleFill, title: "博客", href: "/blogs" },
@@ -15,21 +17,23 @@ const routes = [
 
 const Sidebar = () => {
   return (
-    <nav className="bg-bg-1 flex h-full">
-      <ul className="bg-bg-0 flex shrink-0 basis-12.5 flex-col items-center gap-2.5 pt-2.5">
+    <nav className="bg-bg-1 flex h-full transition-colors">
+      <ul className="bg-bg-0 flex shrink-0 basis-12.5 flex-col items-center gap-2.5 pt-2.5 transition-colors">
         {routes.map((route, index) => {
           const { Icon, title, href } = route
           return (
             <li key={index} className="flex">
-              <Link href={href} className="misc-button">
-                <Icon />
-              </Link>
+              <Tooltip tip={title} placement="right">
+                <Link href={href} className="misc-button">
+                  <Icon />
+                </Link>
+              </Tooltip>
             </li>
           )
         })}
       </ul>
 
-      <div className="page-content mx-2.5 mt-2.5 grow-0 overflow-y-auto">
+      <div className="page-content mx-2.5 mt-2.5 grow-0 overflow-y-auto transition-colors">
         <h2 className="content-title">卡片标题</h2>
         {Array(30)
           .fill(null)

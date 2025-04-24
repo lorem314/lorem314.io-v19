@@ -1,9 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import type { MouseEvent } from "react"
-
-import { useSearchParams, usePathname, useRouter } from "next/navigation"
+import type { ChangeEvent, MouseEvent } from "react"
 
 import { IoCloseSharp } from "react-icons/io5"
 import { FaRegTrashAlt } from "react-icons/fa"
@@ -14,30 +12,28 @@ import useDebounce from "@/hooks/useDebounce"
 
 import type { Tag } from "@/types"
 
-export default function Select({ allTags }: { allTags: Tag[] }) {
-  const searchParams = useSearchParams()
-  const pathname = usePathname()
-  const router = useRouter()
-
+export default function Select({
+  options,
+  selectedTags,
+  onSelectTag,
+  clearSelectedTags,
+  isOrMode,
+  toggleFilterMode,
+}: {
+  options: Tag[]
+  selectedTags: Tag[]
+  onSelectTag: (tag: Tag) => (event: MouseEvent | KeyboardEvent) => void
+  clearSelectedTags: () => void
+  isOrMode: boolean
+  toggleFilterMode: (event: MouseEvent<HTMLButtonElement>) => void
+}) {
   const refSelectedTags = useRef<HTMLUListElement>(null)
   const refTagInput = useRef<HTMLInputElement>(null)
   const refOptions = useRef<HTMLUListElement>(null)
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const [hoveredIndex, setHoveredIndex] = useState(-1)
   const [term, setTerm] = useState("")
   const debouncedTerm = useDebounce(term)
-
-  const params = new URLSearchParams(searchParams)
-  // console.log("[Select] params.tags", params.get("tags")?.split(" "))
-
-  const selectedTagNames =
-    params
-      .get("tags")
-      ?.split(" ")
-      .map((tagName) =>
-        allTags.some((tag) => tag.name === tagName) ? tagName : null,
-      )
-      .filter((tagName) => tagName !== null) || []
 
   // close ul.options when click outside
   useEffect(() => {
@@ -54,7 +50,6 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
   useEffect(() => {
     const nodeSelectedTags = refSelectedTags.current
     const handleWheel = (event: WheelEvent) => {
-      console.log("on wheel")
       if (event.deltaY === 0 || !event.shiftKey) return
       nodeSelectedTags?.scrollBy({ left: event.deltaY < 0 ? -12 : 12 })
     }
@@ -66,34 +61,102 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
     }
   }, [])
 
-  const handleSelectTag =
-    (tagName: string) => (event: MouseEvent | KeyboardEvent) => {
-      const hasSelected = selectedTagNames.includes(tagName)
-      console.log("handleSelectTag tagName:", tagName)
-      console.log("handleSelectTag hasSelected:", hasSelected)
-
-      const params = new URLSearchParams(searchParams)
-
-      if (event.shiftKey) {
-        const tags = params.get("tags")
-        params.set("tags", tags + " " + tagName)
-      } else {
-        params.set("tags", tagName)
+  const handleSelectTag = useCallback(
+    (tag: Tag) => (event: MouseEvent | KeyboardEvent) => {
+      if (event.stopPropagation) {
+        event.stopPropagation()
       }
+      if (!event.shiftKey) {
+        setIsOpen(false)
+      }
+      setTerm("")
+      onSelectTag(tag)(event)
+    },
+    [onSelectTag],
+  )
 
-      console.log("handleSelectTag params.toString():", params.toString())
-      router.replace(`${pathname}?${params.toString()}`)
-    }
+  const filteredOptions = options.filter((option) => {
+    if (debouncedTerm === "") return true
+    return option.name.includes(debouncedTerm)
+  })
 
-  const handleChangeFilterMode = (event: MouseEvent<HTMLButtonElement>) => {
-    const params = new URLSearchParams(searchParams)
-    if (!params.has("mode") || params.get("mode") === "or") {
-      params.set("mode", "and")
-    } else {
-      params.set("mode", "or")
+  // tag input listens to key press event
+  useEffect(() => {
+    const nodeTagInput = refTagInput.current
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target !== nodeTagInput) return
+      switch (event.code) {
+        case "Escape":
+          setIsOpen(false)
+          break
+        case "Enter":
+        case "NumpadEnter":
+        case "Space":
+          event.preventDefault()
+          if (!isOpen) {
+            setIsOpen(true)
+          } else {
+            const hoveredOption = filteredOptions[hoveredIndex]
+            if (hoveredIndex !== -1 && hoveredOption) {
+              handleSelectTag(hoveredOption)(event)
+            }
+            setIsOpen(false)
+          }
+          break
+        case "ArrowUp":
+        case "ArrowDown":
+          event.preventDefault()
+          if (!isOpen) {
+            setIsOpen(true)
+            break
+          }
+          if (hoveredIndex === -1) {
+            setHoveredIndex(() => 0)
+          }
+          const indexAddend = event.code === "ArrowDown" ? 1 : -1
+          const newHoveredIndex = hoveredIndex + indexAddend
+          if (newHoveredIndex >= 0 && newHoveredIndex < options.length) {
+            setHoveredIndex(newHoveredIndex)
+            const nodeOptions = refOptions.current
+            const nodeNextHoveredLi = nodeOptions?.querySelector<HTMLLIElement>(
+              `li:nth-of-type(${newHoveredIndex + 1})`,
+            )
+            if (!nodeNextHoveredLi || !nodeOptions) return
+            if (event.code === "ArrowUp") {
+              if (nodeNextHoveredLi.offsetTop < nodeOptions.scrollTop) {
+                nodeOptions.scrollTop = nodeNextHoveredLi.offsetTop
+              }
+            } else if (event.code === "ArrowDown") {
+              if (
+                nodeNextHoveredLi.offsetTop + nodeNextHoveredLi.offsetHeight >
+                nodeOptions.scrollTop + nodeOptions.clientHeight
+              ) {
+                nodeOptions.scrollTop =
+                  (newHoveredIndex - 3) * nodeNextHoveredLi.offsetHeight
+              }
+            }
+          }
+          return
+        default:
+          return
+      }
     }
-    router.replace(`${pathname}?${params.toString()}`)
-  }
+    if (nodeTagInput) {
+      nodeTagInput.addEventListener("keydown", handleKeyDown)
+    }
+    return () => {
+      nodeTagInput?.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [
+    isOpen,
+    hoveredIndex,
+    options,
+    selectedTags,
+    handleSelectTag,
+    clearSelectedTags,
+    filteredOptions,
+  ])
 
   const handleMouseEnterOption = useCallback(
     (index: number) => () => setHoveredIndex(index),
@@ -101,28 +164,46 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
   )
   const handleMouseLeaveOptions = useCallback(() => setHoveredIndex(-1), [])
 
+  const handleChangeTerm = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      setHoveredIndex(-1)
+      setTerm(event.target.value)
+      setIsOpen(true)
+    },
+    [],
+  )
+
+  const toggleIsOpen = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+      setIsOpen((prevIsOpen) => !prevIsOpen)
+    },
+    [],
+  )
+
   return (
     <div className="relative">
       <h2 className="content-title">
-        <label htmlFor="blog-search">筛选标签</label>
+        <label htmlFor="blog-select">筛选标签</label>
       </h2>
 
-      <div className="flex items-center gap-2.5 rounded border border-neutral-400 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 hover:border-neutral-600">
+      {/* border-neutral-400 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600 hover:border-neutral-600 */}
+      <div className="border-ui-default-border-color flex items-center gap-2.5 rounded border">
         {/*  */}
 
-        {selectedTagNames.length !== 0 ? (
+        {selectedTags.length !== 0 ? (
           <ul
             ref={refSelectedTags}
             className="flex max-w-36 shrink-0 items-center gap-1.5 overflow-x-hidden pl-2"
           >
-            {selectedTagNames.map((selectedTagName) => {
+            {selectedTags.map((selectedTag) => {
               return (
-                <li className="text-sm" key={selectedTagName}>
+                <li className="text-sm" key={selectedTag.name}>
                   <button
-                    className="border border-neutral-300"
-                    onClick={handleSelectTag(selectedTagName)}
+                    className="rounded border border-neutral-300 px-1.5"
+                    onClick={handleSelectTag(selectedTag)}
                   >
-                    {selectedTagName}
+                    {selectedTag.name}
                   </button>
                 </li>
               )
@@ -132,10 +213,15 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
 
         <input
           ref={refTagInput}
+          id="blogs-select"
           className="border-none"
           type="text"
-          onClick={(event) => event.stopPropagation()}
+          placeholder="筛选标签..."
+          autoComplete="off"
+          value={term}
+          onChange={handleChangeTerm}
           onFocus={() => setIsOpen(true)}
+          onClick={(event) => event.stopPropagation()}
         />
 
         <div className="flex items-center">
@@ -143,15 +229,8 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
             <FaRegTrashAlt />
           </button>
 
-          <button
-            className="input-helper-button"
-            onClick={handleChangeFilterMode}
-          >
-            {!searchParams.has("mode") || searchParams.get("mode") === "or" ? (
-              <GiLogicGateOr title="or" />
-            ) : (
-              <GiLogicGateAnd title="and" />
-            )}
+          <button className="input-helper-button" onClick={toggleFilterMode}>
+            {isOrMode ? <GiLogicGateOr /> : <GiLogicGateAnd />}
           </button>
 
           <button className="input-helper-button">
@@ -165,20 +244,26 @@ export default function Select({ allTags }: { allTags: Tag[] }) {
           onClick={(event) => event.stopPropagation()}
           onMouseLeave={handleMouseLeaveOptions}
         >
-          {allTags.map((tag, index) => {
-            const isHovered = index === hoveredIndex
-            return (
-              <li
-                key={index}
-                className={`text-misc-button-icon-color flex h-8 cursor-pointer items-center justify-between px-2 ${isHovered ? "bg-black/10" : "bg-transparent"}`}
-                onMouseEnter={handleMouseEnterOption(index)}
-                onClick={handleSelectTag(tag.name)}
-              >
-                <span>{tag.name}</span>
-                <span>{tag.count}</span>
-              </li>
-            )
-          })}
+          {filteredOptions.length !== 0 ? (
+            filteredOptions.map((tag, index) => {
+              const isHovered = index === hoveredIndex
+              return (
+                <li
+                  key={index}
+                  className={`text-misc-button-icon-color flex h-8 cursor-pointer items-center justify-between px-2 ${isHovered ? "bg-black/10" : "bg-transparent"}`}
+                  onMouseEnter={handleMouseEnterOption(index)}
+                  onClick={handleSelectTag(tag)}
+                >
+                  <span>{tag.name}</span>
+                  <span>{tag.count}</span>
+                </li>
+              )
+            })
+          ) : (
+            <li className="flex h-8 items-center px-2">
+              <p>没有符合查询的标签...</p>
+            </li>
+          )}
         </ul>
 
         {/*  */}

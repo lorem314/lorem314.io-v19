@@ -4,4 +4,254 @@ title: "多态模式"
 chapter: 2
 ---
 
-## 多态模式
+MongoDB 不会强制规定存储在集合中的文档的数据类型，是“无模式”数据库。就算集合中的每个文档的属性都千差万别也是完全可以的（先不论这么做是否有意义）。但在设计规范的应用程序中，更常见的情况是，集合中的每个文档的属性都大相径庭，或完全一致。若集合中的所有文档的结构都相类似但又不完全相同时，我们称之为多态模式。
+
+在本章中，我们将探究为何要使用多态模式、它们所能代表的数据模型的类型和此类建模的方法。之后，便能够使用多态模式来构建强大而灵活的数据模型。
+
+<Section title="多态模式支持面向对象编程">
+
+在面向对象编程的世界中，开发者习惯于用继承在多个类和对象中共享相同的数据和方法。具体来说，面向对象编程允许函数向父类一样操作子类，调用定义在父类中、但又在子类中重构的方法。面向对象语言的这一特性被称为多态性。
+
+关系型数据库，更注重于有着相同且固定的模式的表，因此不太支持这种特性。如果关系型数据库管理系统允许我们为表定义一组相关的模式，以便我们能将层次结构中的任意对象存储到同一个表中（并能通过相同的机制检索），那将会非常实用。
+
+例如，假设我们需要设计一个内容管理系统，需要存储维基页面和图片。需要存储的页面和图片的属性类似，包括：
+
+- 对象的标题
+- 内容管理系统中的 URL 定位器
+- 对象的访问控制
+
+其中的部分属性会有所区别。如图片中不需要用标记语言来存储大串的文本，维基页面中不需要存储二进制图片内容。在关系型数据库中，有多种方法可以对这种继承层次结构进行建模：
+
+- 我们可以只创建一个表，其中包含所有对象中可能包含的所有属性，但这会浪费空间，因为没有哪一个对象会将一整行全部存储满。
+- 或是，为每个对象（图片和维基页面）都创建一个表，但这中做法会向模式（图片和维基页面）中引入冗余，并且使在同时返回两种节点的查询变得复杂。
+- 或是，为基本内容节点类创建一个通用表，并将其与具体的表连接起来。这被称为多态继承建模，它消除了具体表中的冗余，又不会像单表方法浪费空间。
+
+采取多态的方法见表，可得表 2-1、表 2-2 和表 2-3 所示的模式。
+
+<Table id="2-1" title="Nodes 表">
+  <Thead ths={["node_id", "title", "url", "type"]} />
+  <Tbody>
+    <Tr tds={["1", "Welcome", "/", "page"]} />
+    <Tr tds={["2", "About", "/about", "page"]} />
+    <Tr tds={["3", "Cool Photo", "/photo.jpg", "photo"]} />
+  </Tbody>
+</Table>
+
+<Table id="2-2" title="Pages 表">
+  <Thead ths={["node_id", "text"]} />
+  <Tbody>
+    <Tr tds={["1", "Welcome to my wonderful wiki."]} />
+    <Tr tds={["2", "This is text that is about the wiki."]} />
+  </Tbody>
+</Table>
+
+<Table id="2-3" title="Photos 表">
+  <Thead ths={["node_id", "content"]} />
+  <Tbody>
+    <Tr tds={["3", "… binary data …"]} />
+  </Tbody>
+</Table>
+
+另一方面，在 MongoDB 中，我们可以将两种类型的文档存储到同一个集合中，在文档中只存储相关的属性：
+
+```js
+// "Page" document (stored in "nodes" collection")
+{
+  _id: 1,
+  title: "Welcome",
+  url: "/",
+  type: "page",
+  text: "Welcome to my wonderful wiki."
+}
+...
+// "Photo" document (also in "nodes" collection)
+{
+  _id: 3,
+  title: "Cool Photo",
+  url: "/photo.jpg",
+  type: "photo",
+  content: Binary(...)
+}
+```
+
+如果我们在 MongoDB 中采取这种多态模式，我们便能够用相同的集合来执行查询所有节点共有的属性，也能够只查询某个特定的节点属性类型。例如，对于给定的 URL 所显示的内容，内容管理系统需要通过 URL 来检查节点，之后执行特定类型的格式化来显示内容。在关系型数据库中，查询语句类似如下：
+
+```sql
+SELECT
+  nodes.node_id,
+  nodes.title,
+  nodes.type,
+  pages.text,
+  photos.content
+FROM nodes
+  LEFT JOIN pages ON nodes.node_id = pages.node_id
+  LEFT JOIN photos ON nodes.node_id = pages.node_id
+WHERE url=:url;
+```
+
+注意到，我们连接了三个表，这将会大大减慢查询时间。当然，我们可以用单表的设计模式，此时的查询语句如下：
+
+```sql
+SELECT * FROM nodes WHERE url=:url;
+```
+
+然而，在单表继承模型中，我们仍要面临每行中大量的空间浪费。若选择创建两个表，则需要为每一个表都执行一个查询：
+
+```sql
+SELECT * FROM pages WHERE url=:url;
+SELECT * FROM photos WHERE url=:url;
+```
+
+在 MongoDB 中，此类的查询会如单表中一样简洁，如双表中一样高效：
+
+```js
+db.nodes.find_one({ url: url })
+```
+
+</Section>
+
+<Section title="多态模式中的模式演化">
+
+当开发一个数据库驱动的应用程序时，程序员所不得不面对的一个问题，即模式的演化。通常，我们可以写一个迁移脚本，来将数据库转化为另一个版本。在程序发布之前，这种迁移会伴随着删除并重建数据库表。一旦程序上线，数据库中插入了用户的数据，编写脚本改动数据模式，同时还要保持原有数据不变，会变得异常繁琐。
+
+关系型数据库在做迁移时，通常会用到 ALTER TABLE 语句，允许开发者向表中添加、移除列。例如，我们想给表 2-1 中添加一列，用于存储对该节点的描述。SQL 迁移脚本如下：
+
+```sql
+ALTER TABLE nodes ADD COLUMN short_description varchar(255);
+```
+
+ALTER TABLE 的缺点在于，在又很多行的表中执行该语句，可能会耗费大量时间，从而使应用程序在这段时间内需要保持下线，因为 ALTER TABLE 语句执行时会启用锁，防止其他语句在这期间读取表中数据。
+
+在 MongoDB 中，此类操作的脚本为：
+
+```js
+db.nodes.update(
+  {},
+  { $set: { short_description: "" } },
+  false, // upsert
+  true, // multi
+)
+```
+
+这种方式，有着和 ALTER TABLE 相同的缺点，执行耗时长，会对应用程序的性能产生负面影响。
+
+MongoDB 中还有另一种可行方案，在程序中为新属性添加默认值。在 Python 语言中，可用如下语句来处理”老式“文档中的属性缺失：
+
+```python
+def get_node_by_url(url):
+  node = db.nodes.find_one({'url': url})
+  node.setdefault('short_description', '')
+  return node
+```
+
+有了如上代码处理有和没有short_description 的两种情况，我们便可以逐渐对数据库中的文档类型进行迁移。如每次对100个文档进行修改：
+
+```python
+def add_short_descriptions():
+  node_ids_to_migrate = db.nodes.find({'short_description': {'$exists':False}}).limit(100)
+  db.nodes.update(
+    { '_id': { '$in': node_ids_to_migrate } },
+    { '$set': { 'short_description': '' } },
+    multi=True
+ )
+```
+
+当把集合中的所有文档都迁移完毕，就可以将语句恢复成原来的样子了：
+
+```python
+def get_node_by_url(url):
+  node = db.nodes.find_one({'url': url})
+  return node
+```
+
+<Section title="存储（不太高效的）BSON 格式">
+
+MongoDB 对文档结构的非强制性有一个缺点，便是存储效率。在关系型数据库中，表中的列名和类型都是在创建表时就定义好的，因此无需再每一行中再重复这些信息。相比之下，在 MongoDB 中，集合无法知道每个文档中都存储了什么属性，亦或是其值的类型，故这些信息必须存储到每个文档中。具体来说，若是存储的值较小（如整数、日期时间或短字符串），但属性名很长，那么在存储相同的数据时， MongoDB 要比关系型数据库用更多的空间。在 MongoDB 中缓解这类问题的方案之一是，使用短属性名，但这又会使得在命令行中操作数据库变得繁琐。
+
+<Section title="文档对象映射">
+
+一种有助于提高存储效率和迁移的方法是，使用MongoDB 对象文档映射器(object-document mapper)。在 Python 中有多种 ODM 可以选择，例如 MongoEngine、MongoKit 或 Ming。在Ming中，创建 Photo 模型的语句如下：
+
+```python
+class Photo(Document):
+  ...
+  short_description = Field('sd', str, if_missing='')
+  ...
+```
+
+通过如上定义的模式，Ming会在从数据库中加载文档时进行懒迁移，并会将short_description 字段重新命名为sd。
+
+</Section>
+
+</Section>
+
+</Section>
+
+<Section title="多态模式支持半结构化域数据">
+
+在某些应用中，我们可能需要存储半结构化领域数据。例如，数据库中可能有一张产品表，其中的产品可能具有各种属性，但并非所有产品都具备所有属性。当然，这种建模的一种方法是定义所有我们想要存储的产品类，并使用刚才描述的面向对象映射方法。然而，当这种方法与实际商业世界中的数据相遇时，需要避免一些陷阱：
+
+- 产品层级可能会随着商品重新分类而频繁变化
+- 许多产品，即使属于同一类别，也可能存在数据不完整
+
+例如，假设我们正在存储一个磁盘驱动器数据库。虽然清单中的所有驱动器都指定了容量，但有些驱动器可能还会指定缓存大小，而有些驱动器则省略了缓存大小。在这种情况下，我们可以使用包含变量字段的通用属性子文档：
+
+```js
+{
+  _id: ObjectId(...),
+  price: 499.99,
+  title: 'Big and Fast Disk Drive',
+  gb_capacity: 1000,
+  properties: {
+    'Seek Time': '5ms',
+    'Rotational Speed': '15k RPM',
+    'Transfer Rate': '...'
+    ...
+  }
+}
+```
+
+以这种方式存储半结构化数据的缺点是，很难对你希望应用程序忽略的字段执行查询和索引。另一种方法是保存一个属性-值对的数组：
+
+```js
+{
+  _id: ObjectId(...),
+  price: 499.99,
+  title: 'Big and Fast Disk Drive',
+  gb_capacity: 1000,
+  properties: [
+    ['Seek Time', '5ms' ],
+    ['Rotational Speed', '15k RPM'],
+    ['Transfer Rate', '...'],
+    ...
+  ]
+}
+```
+
+如果我们使用属性数组方法，我们可以指示 MongoDB 使用以下命令索引属性字段：
+
+```js
+db.products.ensure_index("properties")
+```
+
+一旦该字段被索引，我们的查询只需指定我们感兴趣的属性值对：
+
+```js
+db.products.find({ 'properties': [ 'Seek Time': '5ms' ] })
+```
+
+在关系数据库中执行等效操作需要更麻烦的方法，例如实体-属性-值模式，在“实体属性值” （第 77 页）中有更详细的介绍。
+
+</Section>
+
+<Section title="总结">
+
+相比较于关系型数据库，MongoDB对文档结构的非强制性为应用程序提供了很多便利性：
+
+- 更好地映射面向对象的继承和多态性
+- 更轻松地在模式之间迁移，减少应用程序停机时间
+- 更好地支持半结构化域数据
+
+有效使用 MongoDB 需要识别多态模式何时可能对您的应用程序有益，并且不要通过复制您可能用于关系数据库系统的相同数据布局来过度规范化您的模式。
+
+</Section>

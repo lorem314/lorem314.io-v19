@@ -33,7 +33,7 @@ const getItems = (sectionLines: string[]) => {
       break
     } else {
       const matches = sectionLine.match(/title="(.*?)"/)
-      const title = matches ? matches[1] : ""
+      const title = matches ? (matches[1] ? matches[1] : "") : ""
       const item: TocItem = { title, items: null }
       items.push(item)
       item.items = getItems(sectionLines)
@@ -74,7 +74,7 @@ const getMdxMeta = (rawBody: string) => {
     } else if (!flag.codeblock.isStarted && isMdCodeBlockStart(line)) {
       // console.log("[CodeBlock Start]", line)
       const matched = line.match(/^(`{3,})[a-zA-Z]{1,}/) || [""]
-      const backtickNumber = matched[1].length
+      const backtickNumber = matched[1] ? matched[1].length : 3
       flag.codeblock.isStarted = true
       flag.codeblock.backtickNumber = backtickNumber
     } else if (flag.codeblock.isStarted && isMdCodeBlockEnd(line)) {

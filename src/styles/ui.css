@@ -1,3 +1,9 @@
+/* page-container in fullscreen */
+#page-container:fullscreen > #article {
+  /* max-width: 100%; */
+  max-width: 75%;
+}
+
 /* toc */
 ul.tree-list > li {
   position: relative;
@@ -89,4 +95,19 @@ ul.tree-list > li > details.close > summary > .details-head-in-toc::before {
   top: 50%;
   left: 100%;
   transform: translate(0, -50%);
+}
+
+/* Table */
+table {
+  /* width: 100%; */
+  max-width: 100%;
+  border-collapse: collapse;
+  @apply text-left rtl:text-right;
+  @apply text-gray-500 dark:text-gray-400;
+}
+th {
+  @apply px-6 py-3;
+}
+td {
+  @apply px-6 py-3;
 }

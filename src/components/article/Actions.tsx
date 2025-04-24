@@ -52,18 +52,21 @@ export default function Actions() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="sticky top-2.5 flex flex-col gap-2.5">
       <Tooltip tip="后退" placement="right">
         <button
           onClick={goBack}
-          className="bg-content-bg size-8 rounded shadow"
+          className="bg-content-bg size-8 rounded shadow transition-colors"
         >
           <IoMdArrowBack className="size-8 p-2 opacity-60 hover:opacity-80 active:opacity-100" />
         </button>
       </Tooltip>
 
       <Tooltip tip="回到顶部" placement="right">
-        <button onClick={toTop} className="bg-content-bg size-8 rounded shadow">
+        <button
+          onClick={toTop}
+          className="bg-content-bg size-8 rounded shadow transition-colors"
+        >
           <BiSolidArrowToTop className="size-8 p-2 opacity-60 hover:opacity-80 active:opacity-100" />
         </button>
       </Tooltip>
@@ -72,7 +75,7 @@ export default function Actions() {
         <Tooltip tip="退出全屏" placement="right">
           <button
             onClick={exitFullscreen}
-            className="bg-content-bg size-8 rounded shadow"
+            className="bg-content-bg size-8 rounded shadow transition-colors"
           >
             <MdFullscreenExit className="size-8 p-2 opacity-60 hover:opacity-80 active:opacity-100" />
           </button>
@@ -81,7 +84,7 @@ export default function Actions() {
         <Tooltip tip="进入全屏" placement="right">
           <button
             onClick={enterFullscreen}
-            className="bg-content-bg size-8 rounded shadow"
+            className="bg-content-bg size-8 rounded shadow transition-colors"
           >
             <MdFullscreen className="size-8 p-2 opacity-60 hover:opacity-80 active:opacity-100" />
           </button>

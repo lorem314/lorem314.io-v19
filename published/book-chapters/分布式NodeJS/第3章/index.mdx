@@ -1,0 +1,1215 @@
+---
+isbn: "978-1-492-07729-9"
+title: "扩展"
+chapter: 3
+---
+
+运行服务的多个冗余副本很重要，原因至少有两个。
+
+第一个原因是为了实现**高可用性**。考虑到进程和整个机器偶尔会崩溃。如果只有一个生产者实例正在运行并且该实例崩溃，那么消费者将无法运行，直到崩溃的生产者重新启动。如果有两个或更多正在运行的生产者实例，一个实例生产者宕机后还有另外的生产者实例保持运行，保证消费者正常访问服务。
+
+另一个原因是给定的 NodeJS 实例只能处理固定的吞吐量。例如，根据硬件的不同，最基本的 NodeJS Hello World 服务的吞吐量可能约为每秒 40,000 个请求 (r/s)。一旦应用程序开始序列化和反序列化数据或执行其他 CPU 密集型工作，吞吐量将下降几个数量级。将工作分配到多个子进程有助于防止单个进程不堪重负从而导致服务崩溃的情况。
+
+下面介绍一些方法，可用于帮助我们拆分工作。<a href="#Cluster-模块">3.1 集群模块</a>介绍了一个 NPM 的内置模块，该模块可以轻松地在同一台服务器上运行应用程序代码的多个副本。<a href="#使用-HAProxy-反向代理">3.2 使用 HAProxy 的反向代理</a>使用外部工具运行服务的多个冗余副本，允许它们运行在不同的机器上。最后，<a href="#SLA-和负载测试">3.3 SLA 和负载测试</a>着眼于通过设置检查基准来了解服务可以处理的负载，基准可用于确定它应该扩展到的实例数量。
+
+<Section title="Cluster模块">
+
+NodeJS 中提供了 Cluster 模块，该模块可以将一个服务运行在同一台计算机的多个不同端口上，并将传入的网络消息分配到这些副本中。这和 child_process 模块很相似，都提供了`fork()`方法来生成子进程；但两者主要区别是 Cluster 模块中有着路由传入请求的机制。
+
+`cluster`模块中提供了一个很简单的 API，可以被任何 NodeJS 程序使用。正因如此，当一个程序需要多个实例时，cluster 是下意识中的首选解决方案。它可以说是无处不在，许多开源的 NodeJS 程序都有在使用该模块。不幸的是，该模块也有一些**反模式**，说不上是最好的程序扩展工具。虽然在这里建议避免使用该模块，但由于其被广泛使用的普遍性，我们还是有必要理解一下它的工作原理。
+
+> 反模式(anti-pattern)：指被认为是不受欢迎的、适得其反的代码设计或编码实践。
+
+在 cluster 模块的<a href="https://nodejs.org/api/cluster.html">官方文档</a>中，使用 if 语句来判断脚本本身是否作为主进程被运行，如果是则通过 fork 方法生成几个子进程。否则创建一个 http 服务器并开始监听。这段代码即有些危险又有一些误导。
+
+<Section title="一个简单的例子">
+
+官方文档中的示例代码之所以危险，是因为在主进程中，加载了许多繁重且复杂的模块；又说它有一些误导是因为，没有明确地表明出有多个程序的实例正在运行，且也没有可供所有实例分享的全局变量。由于这些原因，我们稍加修改，如<a href="#code_3-1">代码 3-1</a>所示：
+
+```js id="3-1" title="recipe-api/producer-http-basic-master.js"
+#!/usr/bin/env node
+
+const cluster = require("cluster") // 1
+
+console.log(`master pid=${process.pid}`)
+
+cluster.setupMaster({
+  exec: __dirname + "/producer-http-basic.js", // 2
+})
+
+cluster.fork() // 3
+cluster.fork()
+
+cluster
+  // 4
+  .on("disconnect", (worker) => {
+    console.log("disconnect", worker.id)
+  })
+  .on("exit", (worker, code, signal) => {
+    console.log("exit", worker.id, code, signal)
+    // cluster.fork(); // 5
+  })
+  .on("listening", (worker, { address, port }) => {
+    console.log("listening", worker.id, `${address}:${port}`)
+  })
+```
+
+1. 引入 cluster 模块
+2. 给出主线程的入口，默认值为 `__filename`
+3. `cluster.fork()` 每次调用都会生成一个新的子进程实例。例子中创建了两个子进程。
+4. cluster 监听了各种事件，并将消息输出到控制台。
+5. 注释掉该行代码，防止子进程难以被终止。
+
+cluster 模块可以生成子进程，同时也可以监听子进程的行为。当子进程监听某个端口时，会给主进程发送消息。实际上是主进程在监听该端口。当有请求传入时，再将请求发送到不同的子进程上。若有子进程监听特殊端口 0（用于选择随机端口），主进程在监听时会确定该端口，之后每个子进程都将收到来自该同一个随机端口的请求。<a href="#figure_3-1">图片 3-1</a>展示了主进程和子进程的关系。
+
+<Figure
+  id="figure_3-1"
+  title="图片 3-1 cluster 的主从关系"
+  src="/books/分布式NodeJS/第3章/图片3-1.png"
+/>
+
+无需对第一章中给出的无状态服务器脚本 recipe-api/producer-http-basic.js 进行修改，在此可以直接作为子进程被生成。接下来我们对主线程发送一些请求。首先，执行 recipe-api/producer-http-basic-**master**.js 脚本。在控制台中会输出以下内容：
+
+```shell
+master pid=7649
+Producer running at http://127.0.0.1:4000
+Producer running at http://127.0.0.1:4000
+listening 1 127.0.0.1:4000
+listening 2 127.0.0.1:4000
+```
+
+目前，有 3 个正在执行的进程。通过执行以下命令可以得到确认，将 PID 替换为主进程所在的 7649：
+
+```shell
+$ brew install pstree # 如果用的是 macOS，需要先安装 pstree
+$ pstree [pid] -p -a
+```
+
+我在 Linux 系统上得到的输出结果如下，由于输出过长省略了一些：
+
+```shell
+node,7649 ./master.js
+ ├─node,7656 server.js
+ │ ├─{node},15233
+ │ ├─{node},15234
+ │ ├─{node},15235
+ │ ├─{node},15236
+ │ ├─{node},15237
+ │ └─{node},15243
+ ├─node,7657 server.js
+ │ ├─ ... Six total children like above ...
+ │ └─{node},15244
+ ├─ ... Six total children like above ...
+ └─{node},15230
+```
+
+输出展示了作为主进程的 `./master.js` 和它的两个子进程 `server.js`。在 Linux 系统中，还会展示一些其他有趣的信息。注意到这三个进程，每个都在下面列出了 6 个标有`{node}`，和各自 PID 的附加项。这些附加项代表底层的 libuv 层中的多线程。若是在 macOS 系统中运行，则不会显示。
+
+</Section>
+
+<Section title="调度请求">
+
+在 macOS 和 Linux 系统中，请求将循环地发送给子进程。在 Windows 系统中，请求将发送给最闲的子进程。我们可以通过连续发送 3 个请求到 recipe-api 上来验证。请求将直接被发送到 recipe-api 服务上。打开控制台，执行 3 次以下命令。
+
+```shell
+$ curl http://localhost:4000/recipes/42 # 执行 3 次
+```
+
+在输出中，可以看到请求被轮流地发往正在执行的两个子进程中：
+
+```shell
+worker request pid=7656
+worker request pid=7657
+worker request pid=7656
+```
+
+在<a href="#code_3-1">代码 3-1 recipe-api-master.js</a>中，监听了几种事件，至此只有 listening 事件被触发过。下面的命令触发了剩余的两个事件。发送 HTTP 请求后，处理请求的子进程的 PID 会被输出到控制台中。通过如下命令终止其中一个子进程：
+
+```shell
+$ kill [pid]
+```
+
+根据之前的输出，我终止的是 PID 为 7656 的子进程。主进程相继触发了 disconnect 和 exit 事件。控制台的输出如下：
+
+```shell
+disconnect 1
+exit 1 null SIGTERM
+```
+
+此时，我们再发送 3 次 HTTP 请求到主进程：
+
+```shell
+$ curl http://localhost:4000/recipes/42 # 执行 3 次
+```
+
+这次，响应全都来自于唯一剩下的那一个子进程。若是将这唯一剩余的子进程也终止，主进程会触发 disconnect 和 exit 事件，然后退出。
+
+在监听 exit 事件的回调函数中，有一行被注释掉的 cluster.fork()，取消该行的注释，重新运行主线程，发送请求得到子进程的 PID，终止其中一个子进程。这次，被终止的子进程马上又被主进程重新生成。这种情况下，唯一可以永久终止子进程的方法是终止主进程。
+
+</Section>
+
+<Section title="Cluster 模块的缺点">
+
+Cluster 模块也并不是灵丹妙药。事实上，它更像是之前说过的反模式，应该使用另外的工具来管理 NodeJS 进程的多个副本。这样做可以更轻松地扩展程序。当然，我们也可以在程序中添加可以调整子进程数量地功能，但这最好还是交给外部工具。这些我们留到<a href="../第7章">第 7 章</a>再讲。
+
+该模块在程序受 CPU 而非 IO 绑定的情况下最有用，部分得益于 JavaScript 的单线程和 libuv 的高效异步事件处理。将请求传递给子进程的方式也使得该模块的执行速度很快。理论上，这要比使用反向代理更快。
+
+<Note>
+
+到最后，NodeJS 应用程序可能会变得很复杂。进程通常不是上百，也会有数十个来进行外部连接、消耗内存或读取配置。每一个都是可能导致程序崩溃的潜在弱点。
+
+正因如此，最好保证主进程尽可能地简单。正如<a href="#code_3-1">代码 3-1</a>中所示，主进程中没有必要引入 http 框架，或是建立数据库连接。可以在主进程中编写重启崩溃的子进程的逻辑，但主进程本身无法轻松地重新启动。
+
+</Note>
+
+使用 cluster 模块的另一个注意事项是，它本质上是在第 4 层，TCP/UDP 一层运行，并不一定了解第七层协议。举个例子，一个传入的 HTTP 请求被发送到主进程和两个子进程上，假设 TCP 连接在请求完成后被关闭，每个请求都被分发到不同的后端服务上。然而，基于 HTTP/2 的 gRPC 协议会故意保持更长时间的连接。这种情况下，之后的 gRPC 调用将不会被分派到其余的子进程上，它们将被困在一个子进程中，从而导致大多数请求都由一个子进程处理，进而使 cluster 模块失去了使用的意义。
+
+这种不必要的、长时间的粘性连接，可以通过<a href="../第2章#基于-RPC-的-gRPC">2.3 基于 RPC 的 gRPC</a>中代码来得到重现。无需修改生产者和消费者的服务代码，通过<a href="#code_3-1">代码 3-1</a>中的通用 cluster 主进程来生成 gRPC 子进程，即可重现问题。执行生产者主进程和消费者，向消费者服务发送几个请求，响应中的 `producer_data.pid` 的值将总会是同一个。
+
+另一个应该避免使用 cluster 模块的原因是，它并不是总是会使程序变得更快。在某些情况下，可能会消耗更多的资源，甚至对程序产生负面影响。假设有一个只限于单个 CPU 内核执行的线程环境，如由亚马逊网页服务(AWS) EC2 提供的 t3.small 虚拟机，则可能发生这种情况。或是进程运行在有 CPU 使用限制的容器内时也有可能发生，我们可以通过配置 Docker 来模拟这种情况。
+
+当执行上面例子中的主进程时，加上两个子进程，一共有 3 个 JS 进程正在执行。然而，却只有一个可用的 CPU 内核来一次执行一个进程。这意味着，操作系统需要花费一些时间来决策在给定的时间内运行三个进程中的哪一个。主进程在大部分时间中会处于睡眠状态，但它的两个子进程会相互争夺 CPU 周期。
+
+让我们看一个实践例子。首先，创建一个可以通过 cluster 模块扩展的、模拟处理 CPU 密集工作的服务器，我们使用计算斐波那契额数列作为 CPU 密集工作。如<a href="#code_3-2">代码 3-2</a>所示：
+
+```js id="3-2" title="cluster-fibonacci.js"
+#!/usr/bin/env node
+
+// npm install fastify@3.2
+const server = require("fastify")()
+const HOST = process.env.HOST || "127.0.0.1"
+const PORT = process.env.PORT || 4000
+
+console.log(`worker pid=${process.pid}`)
+
+// 1
+server.get("/:limit", async (req, reply) => {
+  return String(fibonacci(Number(req.params.limit)))
+})
+
+server.listen(PORT, HOST, () => {
+  console.log(`Producer running at http://${HOST}:${PORT}`)
+})
+
+// 2
+function fibonacci(limit) {
+  let prev = 1n,
+    next = 0n,
+    swap
+  while (limit) {
+    swap = prev
+    prev = prev + next
+    next = swap
+    limit--
+  }
+  return next
+}
+```
+
+1. 服务只有一个路由`/:limit`，响应中会返回斐波那契数列中第 limit 个数的值。
+2. `fibonacci()`函数中进行了大量的 CPU 密集型数学计算，并且会阻塞事件循环。
+
+<a href="#code_3-1">代码 3-1</a>可同样作为该例子的主进程，复制代码到新建文件
+master-fibonacci.js 中，修改子进程入口，让其使用 cluster-fibonacci.js 作为入口。
+
+首先，我们需要一个基准来衡量该斐波那契服务。执行 master-fibonacci.js 并执行以下代码：
+
+```shell
+$ npm install -g autocannon@6                   # 控制台 1
+$ node master-fibonacci.js                      # 控制台 1
+$ autocannon -c 2 http://127.0.0.1:4000/100000  # 控制台 2
+```
+
+这将针对斐波那契的服务端口进行 Autocannon 的基准测试（本章中的<a href="#Autocannon-简介">3.3.1 Autocannon 简介</a>中有更详细的介绍）。上述代码会尽可能快地在两个连接上运行 10 秒钟。之后会输出一个测试结果表格。目前需要考虑的只有两个值，测试结果如<a href="#table_3-1">表格 3-1</a>所示。
+
+<Table id="3-1" title="斐波那契服务（多核）">
+  <Thead ths={["统计", "结果"]} />
+  <Tbody>
+    <Tr tds={["平均延迟 (Avg latency)", "147.05 ms"]} />
+    <Tr tds={["平均访问速度 (Avg req/sec)", "13.46 r/s"]} />
+  </Tbody>
+</Table>
+
+接下来，终止 master-fibonacci.js 主进程，直接运行 cluster-fibonacci.js。之后，执行和之前相同的 autocannon 测试，得到的结果如<a href="#table_3-2">表格 3-2</a>所示。
+
+<Table id="3-2" title="斐波那契服务（单进程）">
+  <Thead ths={["统计", "结果"]} />
+  <Tbody>
+    <Tr tds={["平均延迟 (Avg latency)", "239.61 ms"]} />
+    <Tr tds={["平均访问速度 (Avg req/sec)", "8.2 r/s"]} />
+  </Tbody>
+</Table>
+
+对比两个结果可以得出，多核的情况下，吞吐量可以得到大约 40% 的提升。
+
+接下来，我们模拟一个只能使用单个 CPU 的运行环境，这可以通过 taskset 命令强制令进程使用特定的 CPU 来实现。macOS 系统上没有该命令，但可以通过阅读了解其要点。
+
+执行 master-fibonacci.js 主进程，控制台会输出主进程和两个子进程的 PID，记下这些数，打开另一个控制台，执行以下代码：
+
+```shell
+$ taskset -cp 0 [pid] # 分别换成主进程和两个子进程的 PID 值执行
+```
+
+最后，执行和之前相同的 autocannon 命令，得到测试结果。我的结果如<a href="#table_3-3">表格 3-3</a>所示。
+
+<Table id="3-3" title="斐波那契服务（单核）">
+  <Thead ths={["统计", "结果"]} />
+  <Tbody>
+    <Tr tds={["平均延迟 (Avg latency)", "252.09 ms"]} />
+    <Tr tds={["平均访问速度 (Avg req/sec)", "7.8 r/s"]} />
+  </Tbody>
+</Table>
+
+可以看出，在 CPU 使用被限制的情况下，即使使用 cluster 模块对程序进行了扩展，结果比不进行扩展的单进程服务还要慢。
+
+Cluster 模块的最大缺点是，它只能将传入的请求发往同一台机器上的其他进程。下一节中，我们
+
+</Section>
+
+</Section>
+
+<Section title="使用 HAProxy 反向代理">
+
+**反向代理(Reverse Proxy)**是一种工具，它接收来自客户端的请求，将其转发给另一个服务器，获取到响应后，再将响应发送回客户端。乍一看，这样的工具可能只是添加了不必要的网络跃点并增加了网络延迟，但到最后你会发现，它实际上为服务堆栈提供了很多实用的功能。反向代理通常在第 4 层(TCP)或第 7 层(HTTP)运行。
+
+**负载均衡(Loading Balancing)**是反向代理能提供的功能之一。在反向代理服务回复客户端之前，它能将请求转发到多个其他服务器的任意一个之上，再次强调，虽然这听起来像是无缘无故地增加了额外的 1 网络跃点，因为我们也可以让客户端直接与目标服务器发生通信。但是考虑到，一个公司可能有着多个不同的 API 服务器，但不希望将实用那个 API 的选择权交给用户，例如，是通过 api9.example.org 还是 api1.example.org 来获取数据。相对的，用户只需访问 api.example.org，请求将会由服务器自动发往到其他合适的服务器上。<a href="#figure_3-2">图片 3-2</a>展示了这个概念。
+
+<Figure
+  id="figure_3-2"
+  title="图片 3-2 反向代理拦截传入的网络流量"
+  src="/books/分布式NodeJS/第3章/图片3-2.png"
+/>
+
+在决定将请求发往那个后端服务上，反向代理可以采取多种不同的策略。和 cluster 模块相同，默认情况下是循环地发往每一个服务器。还可以根据服务量，发往当前服务量最少的服务器。或是随机分发，甚至还可以根据请求中的内容进行分发，如存储在 URL 中的 会话(Session) ID 或 cookie（粘性会话）。或是反向代理在分发前，查看哪些服务器是健康的 —— 那些正在良好运行、可以给出响应的服务器，而拒绝将请求发送到亚健康的服务器。
+
+其他的有益功能还包括，清理和拒绝格式错误的 HTTP 请求（这可以防止 NodeJS 中 HTTP 解析器中的错误被利用）、记录请求日志、添加请求超时和执行 gzip 压缩和 TLS 加密。对于除了性能至上的程序来说，使用反向代理的好处通常能胜过所带来的损失。因此，在大多数情况下，我们都应该在 NodeJS 程序和网络之间使用某种形式的反向代理。
+
+<Section title="HAProxy 简介">
+
+HAProxy 是一个高性能、开源的反向代理工具，可以配合第 4 层和第 7 层协议使用。它由 C 语言编写，旨在稳定、使用最少的资源，将尽可能多的处理工作卸载给内核。和 JavaScript 一样，HAProxy 也是事件驱动且单线程的。
+
+使用 HAProxy 非常简单，可以通过发送一个大约十几兆字节的二进制可执行文件来部署，并可以通过文本文件来完成配置。
+
+如何安装 HAProxy 请参考附录 A。
+
+HAProxy 提供了网页版本的面板界面，用于显示正在运行的 HAProxy 实例。我们先不进行任何反向代理，先来看一下面板。新建文件 `haproxy/stats.cfg`，添加<a href="#code_3-3">代码 3-3</a>中的内容。
+
+```text id="3-3" title="haproxy/stats.cfg"
+frontend inbound
+mode http
+bind localhost:8000
+stats enable
+stats uri /admin?stats
+```
+
+1. 创建名为 inbound 的 frontend
+2. 监听 8000 端口
+3. 开启统计界面
+
+有了配置文件，下面就可以执行 HAProxy 了。在控制台中执行以下命令：
+
+```shell
+$ haproxy -f haproxy/stats.cfg
+```
+
+由于上面的配置文件过于简单，控制台中会输出一些警告，之后我们会进行修复。之后，打开浏览器，访问：
+
+```shell
+http://localhost:8000/admin?stats
+```
+
+此时，页面上会显示出 HAProxy 实例的一些信息。目前显示出的只有有关 frontend 一个的信息，我们可以通过刷新页面，观察到传输的比特数一值每次刷新都会增加，这是因为 HAProxy 也会记录自己所处理过的请求的多少。
+
+HAProxy 通过创建 frontend（监听传入请求的端口）和 backend（将请求转发到的由主机和端口识别的上有服务器）来工作。下一节我们会创建一个 backend 来将请求发送至那里。
+
+<BorderBox title="HAProxy 的替代方案">
+
+也有很多其他的工具可以进行反向代理服务，其中比较流行的就是 Nginx 了。和 HAProxy 相同的是，它是一个以二进制形式分发的开源工具，可以简单的通过一个配置文件运行。Nginx 能够执行负载均衡、压缩、TLS 终止和很多其他 HAProxy 也支持的功能。它的一个显著区别是，它被归为 Web 服务器，它能够将请求映射到磁盘上的文件中，这是 HAProxy 中有意缺少的功能。Nginx 还能够缓存响应。
+
+在 AWS 上运行应用程序时，执行负载均衡和 TLS 终止的首选工具是弹性负载均衡(ELB, Elastic Loading Balancing)。HAProxy 的其他功能，如根据请求内容分发到不同的后端服务器，可以有 API Gateway 来执行。
+
+如果想使用比 HAProxy 更加强大的路由工具，请考虑开源工具 Traefik 和 Kong Gateway。
+
+</BorderBox>
+
+</Section>
+
+<Section title="负载均衡和健康检查">
+
+本节中将使用 HAProxy 中的负载均衡功能，并且消除了之前通过执行<a href="#code_3-3">代码 3-3</a>中命令运行时，控制台中输出的警告。之前，我们了解过了使用反向代理拦截传入的请求的原因。在本节中，我们将配置 HAProxy 来完成这项工作。它将充当外部请求和 web-api 之间的负载均衡器，公开单个主机/端口组合，将请求发往两个服务实例。<a href="#figure_3-3">图片 3-3</a>直观地展示了这一点。
+
+技术上讲，使用 HAProxy 负载均衡无需对应用程序进行任何改动。然而，为了能更好的展示，我们添加一个名为健康检查的功能。目前，使用一个响应代码为 200 的后端节点作为健康标准则足矣。复制 web-api/consumer-http-basic.js 中的代码，并添加一个新的端点，如<a href="#code_3-4">代码 3-4</a>所示。<a href="../第4章#健康检查">4.5 健康检查</a>将着眼于构建一个更准确的健康检查端点。
+
+<Figure
+  id="figure_3-3"
+  title="图片 3-3 HAProxy 负载均衡"
+  src="/books/分布式NodeJS/第3章/图片3-3.png"
+/>
+
+```js id="3-4" title="web-api/consumer-http-healthendpoint.js"
+server.get("/health", async () => {
+  console.log("health check")
+  return "OK"
+})
+```
+
+我们还需要重新写一个配置文件。新建文件 haproxy/load-balance.cfg，并添加<a href="#code_3-5">代码 3-5</a>中的内容。
+
+```txt id="3-5" title="haproxy/load-balance.cfg"
+defaults // 1
+  mode http
+  timeout connect 5000ms // 2
+  timeout client 50000ms
+  timeout server 50000ms
+
+frontend inbound
+  bind localhost:3000
+  default_backend web-api // 3
+  stats enable
+  stats uri /admin?stats
+
+backend web-api // 4
+  option httpchk GET /health // 5
+  server web-api-1 localhost:3001 check // 6
+  server web-api-2 localhost:3002 check
+```
+
+1. defaults 一栏设置了多个 frontend
+2. 添加了超时值，这样 HAProxy 就不会输出警告了。
+3. 一个 frontend 可路由到多个 backend，这里只有一个 backend，web-api。
+4. 第一个 backend，web-api。
+5. 通过 GET 方法向 /health 发送请求来检查该 backend 的健康状态。
+6. web-api 将请求发送至两个地方，check 参数表明需要进行健康检查。
+
+该配置指示 HAProxy 查找当前计算机上运行的两个 web-api 实例。为避免端口冲突，配置文件中明确地指出使用 3001 和 3002 端口。名为 inbound 的 frontend 监听 3000 端口，本质上允许 HAProxy 成为常规运行的 web-api 实例的交换替代品。
+
+和本章的第 1 节<a href="#Cluster-模块">2.1 Cluster 模块</a>类似，请求被轮流发送到两个服务进程。但是减少了一个需要维护的 NodeJS 进程。如 `host:port` 所示，这些进程可以不在本地主机上运行。
+
+创建完了配置文件，多了健康检查的节点，我们来执行一些进程。我们需要打开 5 个控制台窗口，前四个命令分别在单独的控制台中执行，第五个命令需要在第五个窗口中多次执行。
+
+```shell
+$ node recipe-api/producer-http-basic.js
+$ PORT=3001 node web-api/consumer-http-healthendpoint.js
+$ PORT=3002 node web-api/consumer-http-healthendpoint.js
+$ haproxy -f ./haproxy/load-balance.cfg
+$ curl http://localhost:3000/ # 运行多次
+```
+
+注意到，由于 HAProxy 默认分发请求的方式是轮流发送，curl 命令的返回结果中的 consumer_pid 会在两个值之间来回替换，而 producer_pid 的值保持不变，因为只有一个 recipe-api 实例正在运行。
+
+首先，recipe-api 先运行，之后是两个 web-api，最后是 HAProxy。HAProxy 实例一旦运行，web-api 的控制台中会不停地输出 `health check` 消息，每 2 秒钟一次。这表明了 HAProxy 开始了健康检查。
+
+通过 <a href="http://localhost:3000/admin?stats" target="_blank">http://localhost:3000/admin?stats</a> 访问 HAProxy 统计页面。现在应该可以看到两个部分，一个是 inbound 的 frontend 部分，一个是 web-api 的 backend 部分。在 web-api 部分，列出了 2 个不同的服务实例，两者的背景色都是绿色，表明服务处于健康状态。部分结果由<a href="#table_3-4">表格 3-4</a>所示。
+
+<Table id="3-4" title="HAProxy 统计数据（部分）">
+  <Thead ths={["", "会话总数", "字节输出", "上一次检查"]} />
+  <Tbody>
+    <Tr tds={["web-api-1", "6", "2,262", "L70K/200 in 1ms"]} />
+    <Tr tds={["web-api-2", "5", "1,885", "L70K/200 in 0ms"]} />
+    <Tr tds={["Backend", "11", "4,147", ""]} />
+  </Tbody>
+</Table>
+
+最后一行 Backend，是上面所有项目的总和。在输出中可以看出，请求在两个实例之间基本被均匀分发，上一次检查一列展示出服务的健康状况。两台服务器都在 1 毫秒内返回 200 状态，通过了 L7 健康检查(HTTP)。
+
+现在，我们来搞些事情。首先，切换到两个 web-api 控制台中的任意一个，通过<kbd>Ctrl</kbd><kbd>C</kbd>终止进程。之后，回到统计页面，刷新几次页面，如果完成得足够快，可以观察到 web-api 中的其中一行的背景颜色由绿色变为黄色，再变为红色。这是因为 HAProxy 断定服务已关闭，因为它不再正确地响应健康检查了。
+
+HAProxy 意识到一个服务已经关闭，再到第五个控制台中发出几个请求。我们还是会收到响应，但它们都来自同一个 PID。HAProxy 知道了其中一个服务器已经无法正常使用，因此只会将请求发往运行状况良好的实例上。
+
+重新运行被终止的那一个子进程，再到回到统计页面进行刷新，可以观察到该进程的背景色从红色变为黄色，再到绿色。再次发送多次请求，HAProxy 又会循环地将请求发往两个实例了。
+
+乍一看，HAProxy 运行得似乎相当顺利。终止了一个服务，就停止接收请求，又重新运行，就又开始接收请求。你能看出有什么问题吗？
+
+在之前运行 web-api 实例的例子中，每 2 秒钟会输出一次 health check，表明健康状态确实被检查。而服务很有可能在这 2 秒钟之间宕机，但 HAProxy 还没有进行下一次健康检查，从而导致请求有可能失败。为了重现这个问题，首先保证两个子进程正常工作，将 PID 替换为其中一个子进程的 PID，执行以下命令：
+
+```shell
+$ kill <CONSUMER_PID> \
+  && curl http://localhost:3000/ \
+  && curl http://localhost:3000/
+```
+
+这段命令在终止了一个消费者进程后，紧接着就又发送了两个请求，速度之快以至于 HAProxy 没有足够的时间意识到其中一个子进程已经无法正常响应了。输出中，应该能看到一个请求失败，另一个请求成功。
+
+健康检查可以被更进一步地配置。在 check 标志后可以添加额外的 flag value 键值对儿。比如：
+
+```txt
+server ... check inter 10s fall 4
+```
+
+<a href="#table_3-5">表格 3-5</a>展示了有哪些额外参数，和如何进行配置。
+
+<Table id="3-5" title="HAProxy 健康检查参数">
+  <Thead ths={["参数", "类型", "默认值", "描述"]} />
+  <Tbody>
+    <Tr tds={["inter", "interval", "2s", "两次状态检查之间的间隔"]} />
+    <Tr tds={["fastinter", "interval", "inter", "状态转换时的间隔"]} />
+    <Tr tds={["downinter", "intterval", "inter", "停机时检查之间的间隔"]} />
+    <Tr tds={["fall", "int", "3", "UP前连续健康检查"]} />
+    <Tr tds={["rise", "int", "2", "DOWN前连续不健康检查"]} />
+  </Tbody>
+</Table>
+
+尽管可以被配置得非常频繁地进行健康检查，但这并不是检测服务器何时关闭地最佳解决方案。使用这种方法总是会存在将请求发往不健康服务器的风险。第 8 章中的<a href="../第8章#等幂性和消息传递弹性">8.6 等幂性和消息传递弹性</a>着眼于解决此问题，客户端需要被配置为重试失败的请求。
+
+</Section>
+
+<Section title="压缩">
+
+通过在包含 HAProxy 应压缩内容的特定后端上设置附加参数，就可以使 HAProxy 开启压缩。开启了压缩的配置文件如代码 3-6 中的内容所示。
+
+```text id="3-6" title="haproxy/compression.cfg"
+defaults
+mode http
+timeout connect 5000ms
+timeout client 50000ms
+timeout server 50000ms
+
+frontend inbound
+bind localhost:3000
+default_backend web-api
+
+backend web-api
+compression offload // 1
+compression algo gzip // 2
+compression type application/json text/plain // 3
+server web-api-1 localhost:3001
+```
+
+1. 防止 HAProxy 将带有 Accept-Encoding 标志的请求转发到后端。
+2. 开启 gzip 压缩，也支持其他压缩算法。
+3. 根据 Content-Type 来决定是否启用压缩。
+
+这个例子中明确地指出，仅在请求头中包含 `Content-Type` 且值为 `application/json` 的响应上启用压缩，也正是这两个服务中使用的，或者值为 `text/plain` 的请求，若是没有明确配置，则默认不会在该值的响应上启用压缩。
+
+类似代码 2-4，gzip 压缩完全能在 NodeJS 中执行，HAProxy 仅当检查请求头中的 `Accept-Encoding` 的值，了解了客户端支持 gzip 压缩后，才会启用 gzip 压缩。为了证实 HAProxy 确实启用了压缩，我们可以通过在控制台中，执行以下代码来验证：
+
+```shell
+$ node recipe-api/producer-http-basic.js
+$ PORT=3001 node web-api/consumer-http-basic.js
+$ haproxy -f haproxy/compression.cfg
+$ curl http://localhost:3000/
+$ curl -H 'Accept-Encoding: gzip' http://localhost:3000/ | gunzip
+```
+
+用 HAProxy 执行 gzip 压缩比用 NodeJS 执行压缩的性能要高。本章的 <a href="#HTTP-压缩">3.3.3.2 HTTP 压缩</a>一节中会测试其性能。
+
+</Section>
+
+<Section title="TLS 终止">
+
+在集中位置执行 TLS 终止非常方便，原因有很多。其中一个重要的原因是，无需向应用程序添加额外的代码逻辑来更新证书，也可以避免人工检查哪一个实例的证书过期了。一个团队就可以处理所有的证书生成，应用程序也不必产生额外的 CPU 开销。
+
+也就是说，HAProxy 会将请求定向到单个服务上。其架构如<a href="#figure_3-4">图片 3-4</a>所示。
+
+<Figure
+  id="figure_3-4"
+  title="图片 3-4 HAProxy 的 TLS 终止"
+  src="/books/分布式NodeJS/第3章/图片3-4.png"
+/>
+
+使用 HAProxy 进行 TLS 终止相当简单，第 2 章中的<a href="../第2章#HTTPS-TLS">2.1.4 HTTPS/TLS</a>中的规则仍然适用。例如，所有证书生成和信任链的概念仍然适用，并且这些证书文件遵循易于理解的标准。唯一的区别是，在这一小节中，我们用到了 `.pem` 文件，该文件同时包含 `.cert` 文件和 `.key` 文件中的内容。代码 3-7 是之前命令的一个改动版本，它将生成明匙和密匙文件，并生成将两者连在一起 `.pem` 文件。
+
+```shell id="3-7" title="生成.pem文件"
+$ openssl req -nodes -new -x509 \
+              -keyout haproxy/private.key \
+              -out haproxy/certificate.cert
+
+$ cat haproxy/certificate.cert haproxy/private.key \
+  > haproxy/combined.pem
+```
+
+现在我们需要另一个 HAProxy 配置文件。代码 3-8 修改了名为 inbound 的 frontend，使其通过 HTTPS 监听，并使用了 .pem 文件。
+
+```text id="3-8" title="haproxy/tls.cfg"
+defaults
+  mode http
+  timeout connect 5000ms
+  timeout client 50000ms
+  timeout server 50000ms
+
+global
+  tune.ssl.default-dh-param 2048
+
+frontend inbound
+  bind localhost:3000 ssl crt haproxy/combined.pem
+  default_backend web-api
+
+backend web-api
+  server web-api-1 localhost:3001
+```
+
+1. `global` 定义了 HAProxy 中的全局设置。
+2. `ssl` 标志意味着 frontend 使用了 TLS，`crt` 标志只想 .pem 文件。
+
+`global` 处定义了客户端使用的 **Diffie-Hellman** 密匙大小，防止 HAProxy 输出警告。
+
+> Diffie–Hellman 密匙交换是一种安全协议。它可以让双方在完全没有对方任何预先信息的条件下通过不安全信道建立起一个密钥。这个密钥可以在后续的通讯中作为对称密钥来加密通讯内容。
+
+用这个新的配置文件运行 HAProxy，并发送一些请求：
+
+```shell
+$ node recipe-api/producer-http-basic.js        # 控制台 1
+$ PORT=3001 node web-api/consumer-http-basic.js # 控制台 2
+$ haproxy -f haproxy/tls.cfg                    # 控制台 3
+$ curl --insecure https://localhost:3000/       # 控制台 4
+```
+
+由于 HAProxy 使用了自签名证书，使用 curl 命令时需要加上 `--insecure` 标志。在程序上线后，由于 HTTPS 接口面向公众，就需要一个真正的证书颁发机构，如 Let's Encrypt 来生成证书。Let's Encrypt 附带了一个名为 certbot 的工具，用于自动更新即将过期的证书，以及重新配置 HAProxy 使用新证书，这些操作无需暂时关闭 HAProxy 服务，可以在 HAProxy 运行时完成。如何配置 certbot 超出了本书的讲述范围，可自行搜索如何操作。
+
+有关 HAProxy 中的 TLS，还有许多其它选项可以配置。如可以指定使用的密码，TLS 会话缓存大小和**服务器名称指示**。单个前端可以为标准 HTTP 和 HTTPS 指定端口，HAProxy 可以将发出的 HTTP 请求的用户重定向到等效的 HTTPS 路径。
+
+> 服务器名称指示(SNI, Server Name Indication)是 TLS 的一个扩展协议。在该协议下，在握手过程开始时客户端告诉它正在连接的服务器要连接的主机名称。这允许服务器在相同的 IP 地址和 TCP 端口号上呈现多个证书，并且因此允许在相同的 IP 地址上提供多个安全（HTTPS）网站（或其他任何基于 TLS 的服务），而不需要所有这些站点使用相同的证书。它与 HTTP/1.1 基于名称的虚拟主机的概念相同，但是用于 HTTPS。
+
+使用 HAProxy 执行 TLS 终止比使用 NodeJS 时的性能要高。我们将在本章中的<a href="#TLS-终止基准测试">3.3.3.3 TLS 终止基准测试</a>
+
+</Section>
+
+<Section title="速率限制和背压">
+
+本章的<a href="#SLA-和负载测试">3.3 SLA 和负载测试</a>一节探讨了如何确定一个 NodeJS 服务可以处理多少吞吐量。本节将探讨如何强制限制吞吐量。
+
+默认情况下，NodeJS 进程将尽可能多地处理收到的请求。例如，创建一个 HTTP 服务，每当访问对应的路由后都会触发对应的回调函数，这些回调函数将由事件循环调度并尽可能地执行。但有时，这会使进程不堪重负。如果回调中包含大量会阻塞事件循环的代码，则过多的回调会导致进程锁死。更要命的是内存消耗，队列中的每个回调都有自己的函数上下文，其中包含变量和对传入请求的引用。有时，最好的解决方案是减少 NodeJS 在给定时间内可处理的并发连接量。
+
+可以通过设置 `http.Server` 实例的 `maxConnections` 属性来做到这一点。通过设置该值，NodeJS 进程将自动拒绝超出设定数量上限的连接。
+
+NPM 上每个流行的 HTTP 框架都接受自定义的 http.Server 实例，或者提供了覆盖该值的方法。下面的例子中，我们使用原生的 HTTP 模块来构建一个基本的 HTTP 服务器。
+
+新建文件，并添加<a href="#code_3-9">代码 3-9</a>中的内容。
+
+```js id="3-9" title="low-connections.js"
+#!/usr/bin/env node
+
+const http = require("http")
+
+const server = http.createServer((req, res) => {
+  console.log("current conn", server._connections)
+  setTimeout(() => res.end("OK"), 10_000) // 1
+})
+
+server.maxConnections = 2 // 2
+server.listen(3020, "localhost")
+```
+
+1. 用 setTimeout 模拟耗时长的异步代码，如数据库连接。
+2. 设置最大连接数量为 2。
+
+该服务器模拟了一个响应时长很慢的程序。每个请求在响应之前都需要等待 10 秒钟。虽然这并不能很好的模拟 CPU 密集型工作，但它确实模拟了一个响应慢到足以会压垮 NodeJS 进程的请求。
+
+接下来，打开 4 个控制台。在第一个控制台中，执行 low-connections.js 脚本。在另外 3 个控制台中，分别通过 curl 命令向目标服务器发送 HTTP 请求。三个请求应在 10 秒钟内完成，好能得到第三个请求被拒绝的场景。
+
+```shell
+$ node low-connections.js       # 控制台 1
+$ curl http://localhost:3020/   # 控制台 2-4
+```
+
+在整个过程中，第一个请求的响应会很慢，理应 10 秒钟后才会在控制台中输出 OK。第三个请求被发送后，控制台中应该会输出一段错误，且连接会马上关闭。我的情况下显示的是：`curl: (56) Recv failure: Connection reset by peer.`。同时，服务器的控制台中也不会输出当前服务器的连接数量。
+
+`server.maxConnections` 一值对该服务所能接受的最大连接数量做出了硬性限制，NodeJS 将拒绝超过该限制的任何链接。
+
+这听起来可能有些刺耳。作为一个接受客户端请求的服务器，更理想的方案可能是，让服务器对请求进行排队。幸运的是，HAProxy 可以通过配置，帮助程序做到这一点。新建一个 HAProxy 配置文件，添加<a href="#code_3-10">代码 3-10</a>中的内容。
+
+```text id="3-10" title="haproxy/backpressure.cfg"
+defaults
+  maxconn 8 // 1
+  mode http
+
+frontend inbound
+  bind localhost:3010
+  default_backend web-api
+
+backend web-api
+  option httpclose // 2
+  server web-api-1 localhost:3020 maxconn 2 // 3
+```
+
+1. 可以全局设置连接数上限，对 frontend 和 backend 均有效。
+2. 强制 HAProxy 关闭对后端的 HTTP 连接。
+3. 可以为每个 backend 分别限制可接受的最大连接数。
+
+例子中设置了一个默认标志 `maxconn 8`。这意味着在所有前后端组合中，最多只能同时保持 8 个连接，包括对管理界面的访问。要用的话，一般会将其设置为一个保守值。更有趣的是，对 web-api-1 子进程添加的 `maxconn 2` 标志。这才是限制了该子进程服务连接数的真正参数。
+
+另外，后端中有一个 httpclose 标志。这会使 HAProxy 立即关闭和后端的连接。让这些连接保持打开状态并不一定会减慢服务速度，但由于该后端设置了最大连接数为 2，这是必须要设置的；当连接保持打开状态时，服务仍会拒绝新连接，即使上一个请求的回调已经完成执行。
+
+用这个新的配置文件开启 HAProxy，同时运行 NodeJS 服务，并发送请求：
+
+```shell
+$ node low-connections.js               # 控制台 1
+$ haproxy -f haproxy/backpressure.cfg   # 控制台 2
+$ curl http://localhost:3010/           # 控制台 3-5
+```
+
+前两个请求发出后，会马上在服务器控制台上输出当前连接数的消息，但第三个请求连接，并不会输出错误并立刻退出，而是会等到之前的请求完成，一旦之前的请求完成并关闭了连接，HAProxy 意识到有空位了，第三个请求会被传入服务器，使服务器控制台输出消息。服务器控制台上的输出如下：
+
+```shell
+current conn 1
+current conn 2
+current conn 2
+```
+
+当请求一个接一个地排起队时，背压就产生了，正如上述例子中。若消费者连续发出请求，服务器上产生的背压将导致消费者放慢速度。
+
+通常，限制连接数量的上限只需在反向代理中进行，而无需在应用程序架构本身中进行。然而，根据架构实现方式，或是除了 HAProxy 实例以外的源也可能能够向服务发送请求的情况下，则可以在 NodeJS 程序中设置更高的连接上限数，而在反向代理中设置更保守的限制。例如，假设服务器会在超过 100 个请求同时在队列中等待时陷入停顿，则可以将 server.maxConnections 设置为 90，并将 maxconn 设置为 80。
+
+明白了如何限制最大连接数，下面来看如何确定一个服务器的可实际处理的连接数。
+
+</Section>
+
+</Section>
+
+<Section title="SLA 和负载测试">
+
+**软件即服务**公司为用户提供全天在线服务，这很符合现代用户的期望。想象一下，如果 Facebook 每周五下午 2 点到 3 点之间无法使用将会是多么的奇怪。企业对企业公司通常有着更加严格的要求，通常还伴有合同义务。当组织出售 API 访问权限时，通常会有合同条款规定，该组织不会在没有充分通知升级的情况下进行向后破坏性的更改，服务将全天可用，并且请求将在指定的时间跨度内得到服务。
+
+此类合同要求称为服务级别协议 (SLA)。有时公司会在线提供它们，例如 Amazon 计算服务级别协议页面。有时，它们是根据每个客户进行协商的。可悲的是，通常它们根本不存在，性能也没有被优先考虑，工程师在收到客户投诉单之前无法解决这些问题。
+
+SLA 可能包含多个服务级别目标 (SLO)。这些是组织在 SLA 中向客户做出的单独承诺。它们可以包括正常运行时间要求、API 请求延迟和故障率等内容。当衡量服务所实现的实际价值时，这些被称为服务水平指标（SLI）。我喜欢将 SLO 视为分子，将 SLI 视为分母。 SLO 可能是 API 应在 100 毫秒内响应，而 SLI 可能是 API 在 83 毫秒内响应。
+
+本节着眼于确定 SLO 的重要性，不仅对于组织而且对于个人服务也是如此。它着眼于定义 SLO 的方法以及通过运行一次性负载测试（有时称为基准）来衡量服务性能的方法。随后，第 4 章的 4.3 Graphite、StatsD 和 Grafana 的指标 介绍了如何持续监控性能。
+
+在定义 SLA 之前，您将首先了解一些性能特征以及如何衡量它们。 为此，您将对之前构建的一些服务进行负载测试。 这应该让您熟悉负载测试工具以及在没有业务逻辑的情况下预期的吞吐量。 一旦您熟悉了，测量您自己的应用程序应该会更容易。
+
+<Section title="Autocannon 简介">
+
+我们使用 Autocannon 工具进行负载测试。虽然还有其他工具可供选择，但这个易于安装，又能显示详细地统计信息。
+
+<Warning>
+
+请随意使用您最熟悉的任何负载测试工具。 但是，切勿将一种工具的结果与另一种工具的结果进行比较，因为同一服务的结果可能会有很大差异。 尝试在整个组织中标准化同一工具，以便团队能够一致地沟通绩效。
+
+</Warning>
+
+Autocannon 作为 npm 包提供，它恰好提供了请求统计信息的直方图，这是衡量性能时非常重要的工具。 通过运行以下命令来安装它（请注意，如果出现权限错误，您可能需要在其前面加上 sudo 前缀）：
+
+```shell
+$ npm install -g autocannon@6
+```
+
+<BorderBox title="Autocannon 的替代品">
+
+有许多用于运行 HTTP 负载测试的命令行工具。 由于 Autocannon 需要安装 Node.js 和 npm，因此多语言组织可能很难标准化，因为其他工具可作为本机二进制文件使用，并且更容易安装。
+
+一些更流行的工具包括 Apache Bench (ab)、wrk 和 Siege。 这些通常可以通过操作系统包管理器获得。
+
+Gil Tene 有一个演讲“如何不测量延迟”，其中讨论了大多数负载测试工具的常见缺点。 他的 wrk2 工具试图解决此类问题并提供高度准确的负载测试结果。 Autocannon 的灵感来自于 wrk2。
+
+</BorderBox>
+
+</Section>
+
+<Section title="运行基线负载测试">
+
+这些负载测试将主要运行您已在示例/文件夹中创建的应用程序。 但首先，您将熟悉 Autocannon 命令，并通过负载测试一些非常简单的服务来建立基线。 第一个将是普通 NodeJS HTTP 服务器，下一个将使用框架。 在这两种情况下，都将使用一个简单的字符串作为回复。
+
+<Warning>
+
+请务必禁用请求处理程序中运行的任何 console.log() 语句。 尽管这些语句在执行实际工作的生产应用程序中提供了微不足道的延迟，但它们显着减慢了本节中的许多负载测试。
+
+</Warning>
+
+对于第一个示例，创建一个名为 benchmark/ 的新目录，并在其中使用示例 3-11 中的内容创建一个文件。 这个普通的 HTTP 服务器将充当最基本的负载测试。
+
+```js id="3-11" title="benchmark/native-http.js"
+#!/usr/bin/env node
+
+const HOST = process.env.HOST || "127.0.0.1"
+const PORT = process.env.PORT || 4000
+
+require("http")
+  .createServer((req, res) => {
+    res.end("ok")
+  })
+  .listen(PORT, () => {
+    console.log(`Producer running at http://${HOST}:${PORT}`)
+  })
+```
+
+理想情况下，所有这些测试都将在具有与生产服务器相同功能的未使用服务器上运行，但为了学习，在本地开发笔记本电脑上运行它就可以了。 请记住，您在本地获得的数字不会反映您在生产中获得的数字！
+
+运行该服务，然后在另一个终端窗口中运行 Autocannon 以启动负载测试：
+
+```shell
+$ node benchmark/native-http.js
+$ autocannon -d 60 -c 10 -l http://localhost:4000/
+```
+
+该命令使用三个不同的标志。 -d 标志代表持续时间，在本例中，它配置为运行 60 秒。 -c 标志表示并发连接数，这里配置为使用 10 个连接。 -l 标志告诉 Autocannon 显示详细的延迟直方图。 要测试的 URL 是命令的最后一个参数。 在这种情况下，Autocannon 仅发送 GET 请求，但可以将其配置为发出 POST 请求并提供请求正文。
+
+<a href="#table_3-6">表格 3-6</a>、<a href="#table_3-7">表格 3-7</a>和
+<a href="#table_3-6">表格 3-8</a>是我得到的结果。
+
+<Table id="3-6" title="Autocannon 请求延迟">
+  <Thead
+    ths={[
+      "统计数据",
+      "2.5%",
+      "50%",
+      "97.5%",
+      "99%",
+      "平均值",
+      "标准差",
+      "最大值",
+    ]}
+  />
+  <Tbody>
+    <Tr
+      tds={["延迟", "0ms", "0ms", "0ms", "0ms", "0.01ms", "0.08ms", "9.45ms"]}
+    />
+  </Tbody>
+</Table>
+
+第一个表包含有关延迟的信息，或者发送请求后接收响应所需的时间。 正如您所看到的，Autocannon 将延迟分为四个部分。 2.5% 的桶代表相当快的请求，50% 是中值，97.5% 是较慢的结果，99% 是最慢的结果，Max 列代表最慢的请求。 在此表中，结果越低速度越快。 到目前为止，数字太小，还无法做出决定。
+
+<Table id="3-7" title="Autocannon 请求量">
+  <Thead
+    ths={[
+      "统计数据",
+      "1%",
+      "2.5%",
+      "50%",
+      "97.5%",
+      "平均值",
+      "标准差",
+      "最小值",
+    ]}
+  />
+  <Tbody>
+    <Tr
+      tds={[
+        "个/秒",
+        "29,487",
+        "36,703",
+        "39,039",
+        "42,751",
+        "38,884.14",
+        "1,748.17",
+        "29,477",
+      ]}
+    />
+    <Tr
+      tds={[
+        "比特/秒",
+        "3.66 MB",
+        "4.55 MB",
+        "4.84 MB",
+        "5.3 MB",
+        "4.82 MB",
+        "217 kB",
+        "3.66 MB",
+      ]}
+    />
+  </Tbody>
+</Table>
+
+第二个表提供了一些不同的信息，即每秒发送到服务器的请求数。 在此表中，数字越大越好。 此表中的标题与上表中的相反标题相关； 例如，1% 列与 99% 列相关。
+
+这个表中的数字更有趣。 他们描述的是，服务器平均每秒能够处理 38,884 个请求。 但平均值并没有太大用处，工程师不应该依赖这个数字吗？
+
+考虑到通常的情况，用户的一个请求可能会导致多个请求发送到给定的服务。 例如，如果用户打开一个网页，其中根据前 10 个菜谱列出了他们应该储备哪些原料，那么该请求可能会生成 10 个对菜谱服务的请求。 整个用户请求的缓慢又会因后端服务请求的缓慢而变得更加复杂。 因此，在报告服务速度时，选择较高的百分位（例如 95% 或 99%）非常重要。 这被称为最高百分位，在表示吞吐量时缩写为 TP95 或 TP99。
+
+对于这些结果，可以说 TP99 的延迟为 0 毫秒，或者每秒吞吐量为 29,487 个请求。
+
+第三个表是提供 -l 标志的结果，包含更精细的延迟信息。
+
+<Table id="3-8" title="Autocannon 详细延迟结果">
+  <Thead ths={["百分比", "延迟", "百分比", "延迟", "百分比", "延迟"]} />
+  <Tbody>
+    <Tr tds={["0.001% ", "0 ms", "10%", "0 ms", "97.5%", "0 ms"]} />
+    <Tr tds={["0.01% ", "0 ms", "25% ", "0 ms", "99% ", "0 ms"]} />
+    <Tr tds={["0.1% ", "0 ms", "50% ", "0 ms", "99.9% ", "1 ms"]} />
+    <Tr tds={["1% ", "0 ms", "75% ", "0 ms", "99.99% ", "2 ms"]} />
+    <Tr tds={["2.5%", "0 ms", "90% ", "0 ms", "99.999%", "3 ms"]} />
+  </Tbody>
+</Table>
+
+倒数第二行解释了 99.99% 的请求（四个 9）将在至少 2 毫秒内得到响应。 最后一行解释了 99.999% 的请求将在 3 毫秒内得到响应。
+
+然后可以将这些信息绘制成图表，以更好地传达正在发生的情况，如<a href="#figure_3-5">图片 3-5</a>所示。
+
+<Figure
+  id="figure_3-5"
+  title="图片 3-5 Autocannon 延迟结果图"
+  src="/books/分布式NodeJS/第3章/图片3-5.png"
+/>
+
+同样，由于数字如此之低，结果还不是那么有趣。
+
+根据我的结果，我可以确定，假设 TP99，使用此特定版本的 Node.js 和此特定硬件从 Node.js 服务获得的绝对最佳吞吐量约为 25,000 r/s（经过一些保守舍入后） 。 那么尝试实现高于该价值的任何事情都是愚蠢的。
+
+事实证明，25,000 r/s 实际上相当高，而且您很可能永远不会遇到需要从单个应用程序实例实现如此吞吐量的情况。 如果您的用例确实需要更高的吞吐量，您可能需要考虑其他语言，例如 Rust 或 C++。
+
+</Section>
+
+<Section title="反向代理要事">
+
+之前我声称在反向代理中执行某些操作（特别是 gzip 压缩和 TLS 终止）通常比在正在运行的 Node.js 进程中执行它们要快。 负载测试可用于检验这些说法是否属实。
+
+这些测试在同一台计算机上运行客户端和服务器。 要准确地对生产应用程序进行负载测试，您需要在生产设置中进行测试。 这里的目的是测量 CPU 影响，因为 Node.js 和 HAProxy 生成的网络流量应该是相等的。
+
+<Section title="建立测试基线">
+
+但首先，需要建立另一个基线，并且必须面对一个不可避免的事实：引入反向代理必须至少增加一点延迟。 为了证明这一点，请使用之前相同的 benchmark/native-http.js 文件。 不过，这次您将把最低配置的 HAProxy 放在它前面。 使用示例 3-12 中的内容创建一个配置文件。
+
+```text id="3-12" title="haproxy/benchmark-basic.cfg"
+defaults
+  mode http
+
+frontend inbound
+  bind localhost:4001
+  default_backend native-http
+
+backend native-http
+  server native-http-1 localhost:4000
+```
+
+在一个终端窗口中运行服务，在第二个终端窗口中运行 HAProxy，然后在第三个终端窗口中运行相同的 Autocannon 负载测试：
+
+```shell
+$ node benchmark/native-http.js
+$ haproxy -f haproxy/benchmark-basic.cfg
+$ autocannon -d 60 -c 10 -l http://localhost:4001
+```
+
+我得到的结果如图 3-6 所示。 TP99 吞吐量为 19,967 r/s，下降 32%，最大请求耗时 28.6ms。
+
+与之前的结果相比，这些结果可能看起来很高，但再次请记住，应用程序没有做太多工作。 在添加 HAProxy 之前和之后，请求的 TP99 延迟仍然小于 1ms。 如果真实的服务需要 100ms 响应，HAProxy 的加入使得响应时间增加了不到 1%。
+
+<Figure
+  id="figure_3-6"
+  title="图片 3-6 HAProxy 延迟"
+  src="/books/分布式NodeJS/第3章/图片3-6.png"
+/>
+
+</Section>
+
+<Section title="HTTP 压缩基准测试">
+
+接下来的两个测试需要一个简单的直通配置文件。 此配置将使 HAProxy 仅将请求从客户端转发到服务器。 配置文件有一个模式 tcp 行，这意味着 HAProxy 本质上将充当 L4 代理，并且不会检查 HTTP 请求。
+
+拥有 HAProxy 可确保基准测试将处理从 Node.js 卸载到 HAProxy 的效果，而不是额外网络跃点的效果。 使用示例 3-13 中的内容创建 haproxy/passthru.cfg 文件。
+
+```text id="3-13" title="haproxy/passthru.cfg"
+defaults
+  mode tcp
+  timeout connect 5000ms
+  timeout client 50000ms
+  timeout server 50000ms
+
+frontend inbound
+  bind localhost:3000
+  default_backend server-api
+
+backend server-api
+  server server-api-1 localhost:3001
+```
+
+现在您可以测量执行 gzip 压缩的成本。 这里不比较压缩与不压缩。 （如果这是目标，测试绝对需要在单独的机器上进行，因为增益在于减少带宽。）
+
+相反，我们比较了 HAProxy 与 Node.js 中执行压缩的性能。
+
+使用示例 2-4 中创建的相同 server-gzip.js 文件，但您需要注释掉 console.log 调用。 还将使用在示例 3-6 中创建的相同 haproxy/compression.cfg 文件，以及刚刚在示例 3-13 中创建的 haproxy/passthru.cfg 文件。 对于此测试，您需要停止 HAProxy 并使用不同的配置文件重新启动它：
+
+```shell
+$ rm index.html ; curl -o index.html https://thomashunter.name
+$ PORT=3001 node server-gzip.js
+$ haproxy -f haproxy/passthru.cfg
+$ autocannon -H "Accept-Encoding: gzip" \
+             -d 60 -c 10 -l http://localhost:3000/ # Node.js
+
+# Kill the previous haproxy process
+$ haproxy -f haproxy/compression.cfg
+$ autocannon -H "Accept-Encoding: gzip" \
+             -d 60 -c 10 -l http://localhost:3000/ # HAProxy
+```
+
+这是我在我的机器上运行测试时的结果。 图 3-7 显示了使用 Node.js 运行 gzip 的结果，图 3-8 包含 HAProxy 的结果。
+
+<Figure
+  id="figure_3-7"
+  title="图片 3-7 NodeJS gzip 压缩延迟"
+  src="/books/分布式NodeJS/第3章/图片3-7.png"
+/>
+
+此测试表明，使用 HAProxy 执行 gzip 压缩时的请求处理速度比使用 Node.js
+时要快一些。
+
+<Figure
+  id="figure_3-8"
+  title="图片 3-8 HAProxy gzip 压缩延迟"
+  src="/books/分布式NodeJS/第3章/图片3-8.png"
+/>
+
+</Section>
+
+<Section title="TLS 终止基准测试">
+
+TLS 绝对会对应用程序性能产生负面影响 5（从 HTTP 与 HTTPS 的角度来看）。 这些测试只是比较在 HAProxy 而不是 Node.js 中执行 TLS 终止的性能影响，而不是比较 HTTP 与 HTTPS。 由于测试运行速度如此之快，延迟列表图大部分包含零，因此吞吐量数字已在下面重现。
+
+首先，测试在 Node.js 进程中执行 TLS 终止。 对于此测试，请使用您在示例 2-7 中创建的相同 Recipe-api/ Producer-https-basic.js 文件，注释掉请求处理程序中的所有 console.log 语句：
+
+```shell
+$ PORT=3001 node recipe-api/producer-https-basic.js
+$ haproxy -f haproxy/passthru.cfg
+$ autocannon -d 60 -c 10 https://localhost:3000/recipes/42
+```
+
+表 3-9 包含在我的机器上运行此负载测试的结果。
+
+<Table id="3-9" title="本机 NodeJS TLS 终止吞吐量">
+  <Thead
+    ths={["统计数据", "1%", "2.5%", "50%", "97.5%", "平均", "标准差", "最小值"]}
+  />
+  <Tbody>
+    <Tr
+      tds={[
+        "个请求/秒",
+        "7,263",
+        "11,991",
+        "13,231",
+        "18,655",
+        "13,580.7",
+        "1,833.58",
+        "7,263",
+      ]}
+    />
+    <Tr
+      tds={[
+        "比特/秒",
+        "2.75 MB",
+        "4.53 MB",
+        "5 MB",
+        "7.05 MB",
+        "5.13 MB",
+        "693 kB",
+        "2.75 MB",
+      ]}
+    />
+  </Tbody>
+</Table>
+
+接下来，要测试 HAProxy，请使用示例 1-6 中创建的 Recipe-api/ Producer-http-basic.js 文件（再次注释掉 console.log 调用）以及 haproxy/tls.cfg 例 3-8 中的文件：
+
+```shell
+$ PORT=3001 node recipe-api/producer-http-basic.js
+$ haproxy -f haproxy/tls.cfg
+$ autocannon -d 60 -c 10 https://localhost:3000/recipes/42
+```
+
+表 3-10 包含在我的机器上运行此负载测试的结果。
+
+<Table id="3-10" title="HAProxy TLS 终止吞吐量">
+  <Thead
+    ths={["统计数据", "1%", "2.5%", "50%", "97.5%", "平均", "标准差", "最小值"]}
+  />
+  <Tbody>
+    <Tr
+      tds={[
+        "个请求/秒",
+        "960",
+        "1,108 ",
+        "1,207",
+        "1,269",
+        "1,202.32 ",
+        "41.29 ",
+        "960",
+      ]}
+    />
+    <Tr
+      tds={[
+        "比特/秒",
+        "216 kB",
+        "249 kB",
+        "272 kB",
+        "286 kB",
+        "271 kB",
+        "9.29 kB",
+        "216 kB",
+      ]}
+    />
+  </Tbody>
+</Table>
+
+在这种情况下，当让 HAProxy 而不是 Node.js 执行 TLS 终止时，会发生巨大的损失！ 然而，对此持保留态度。 到目前为止使用的 JSON 有效负载大约有 200 字节长。 对于较大的有效负载（例如超过 20kb 的有效负载），HAProxy 在执行 TLS 终止时通常优于 Node.js。
+
+与所有基准测试一样，在您的环境中测试您的应用程序非常重要。 本书中使用的服务非常简单； 一个“真实”的应用程序，执行模板渲染等 CPU 密集型工作，以及发送具有不同负载大小的文档，其行为将完全不同。
+
+</Section>
+
+</Section>
+
+<Section title="协议要事">
+
+现在，您将对之前介绍的一些协议进行负载测试，即 JSON over HTTP、GraphQL 和 gRPC。 由于这些方法确实改变了有效负载内容，因此测量它们在网络上的传输将比第 80 页的“反向代理问题”更重要。此外，请记住，像 gRPC 这样的协议更有可能用于跨服务流量，而不是用于跨服务流量。 外部流量。 因此，我将在同一云提供商数据中心内的两台不同计算机上运行这些负载测试。
+
+对于这些测试，你的方法将是稍微作弊。 理想情况下，您应该从头开始构建一个客户端，该客户端可以本地化正在测试的协议并测量吞吐量。 但由于您已经构建了接受 HTTP 请求的 Web-API 客户端，因此您只需将 Autocannon 指向这些客户端即可，这样您就不需要构建三个新应用程序。 如图 3-9 所示。
+
+由于存在额外的网络跃点，这种方法无法准确测量性能，例如 X 比 Z 快 Y%，但它可以对它们的性能进行排名（如使用这些特定库在 Node.js 中实现的那样）从最快到最慢。
+
+<Figure
+  id="figure_3-9"
+  title="图片 3-9 云端的基准测试"
+  src="/books/分布式NodeJS/第3章/图片3-9.png"
+/>
+
+如果您可以访问云提供商并且有几美元闲置，请随意启动两个新的 VPS 实例并将迄今为止的示例/目录复制到它们。 您应该使用至少有两个 CPU 核心的机器。 这对于客户端尤其重要，因为 Autocannon 和 web-api 可能会争夺单核的 CPU 访问权限。 否则，您也可以在开发计算机上运行示例，此时您可以省略 TARGET 环境变量。
+
+请务必将以下每个示例中的 [RECIPE_API_IP] 替换为 Recipe-api 服务的 IP 地址或主机名。
+
+<Section title="基于 HTTP 的 JSON 的基准测试">
+
+第一个负载测试将通过示例 1-7 中创建的 web-api/consumer-http-basic.js 服务发送请求，对示例 1-6 中创建的 Recipe-api/ Producer-http-basic.js 服务进行基准测试：
+
+```shell
+# Server VPS
+$ HOST=0.0.0.0 node recipe-api/producer-http-basic.js
+# Client VPS
+$ TARGET=<RECIPE_API_IP>:4000 node web-api/consumer-http-basic.js
+$ autocannon -d 60 -c 10 -l http://localhost:3000
+```
+
+我的该基准测试结果如图 3-10 所示。
+
+<Figure
+  id="figure_3-10"
+  title="图片 3-10 基于 HTTP 的 JSON 的基准测试"
+  src="/books/分布式NodeJS/第3章/图片3-10.png"
+/>
+
+</Section>
+
+<Section title="GraphQL 基准">
+
+下一个负载测试将使用示例 2-11 中创建的 Recipe-api/ Producer-graphql.js 服务，通过示例 2-12 中创建的 web-api/consumer-graphql.js 服务发送请求：
+
+```shell
+# Server VPS
+$ HOST=0.0.0.0 node recipe-api/producer-graphql.js
+# Client VPS
+$ TARGET=<RECIPE_API_IP>:4000 node web-api/consumer-graphql.js
+$ autocannon -d 60 -c 10 -l http://localhost:3000
+```
+
+我的负载测试结果如图 3-11 所示。
+
+<Figure
+  id="figure_3-11"
+  title="图片 3-11 GraphQL 基准测试"
+  src="/books/分布式NodeJS/第3章/图片3-11.png"
+/>
+
+</Section>
+
+<Section title="gRPC 基准测试">
+
+最终的负载测试将通过示例 2-15 中创建的 web-api/consumer-grpc.js 服务发送请求来测试示例 2-14 中创建的 Recipe-api/ Producer-grpc.js 服务：
+
+```shell
+# Server VPS
+$ HOST=0.0.0.0 node recipe-api/producer-grpc.js
+# Client VPS
+$ TARGET=<RECIPE_API_IP>:4000 node web-api/consumer-grpc.js
+$ autocannon -d 60 -c 10 -l http://localhost:3000
+```
+
+我的负载测试结果如图 3-12 所示。
+
+<Figure
+  id="figure_3-12"
+  title="图片 3-12 GraphQL 基准测试"
+  src="/books/分布式NodeJS/第3章/图片3-12.png"
+/>
+
+</Section>
+
+<Section title="结论">
+
+根据这些结果，JSON over HTTP 通常是最快的，GraphQL 是第二快的，gRPC 是第三快的。 同样，对于现实世界的应用程序，这些结果将会改变，特别是在处理更复杂的有效负载或服务器相距较远时。
+
+原因是 JSON.stringify() 在 V8 中进行了极其优化，因此任何其他序列化器都将很难跟上。 GraphQL 有自己的解析器来解析查询字符串，与纯粹使用 JSON 表示的查询相比，这会增加一些额外的延迟。 gRPC 需要做一堆 Buffer 工作来将对象序列化和反序列化为二进制。 这意味着 gRPC 在 C++ 等更静态的编译语言中应该比在 JavaScript 中更快。
+
+</Section>
+
+</Section>
+
+<Section title="Coming Up with SLOs">
+
+SLO 可以涵盖服务的许多不同方面。 其中一些是与业务相关的要求，例如该服务永远不会向客户收取单次购买的双倍费用。 其他更通用的 SLO 是本节的主题，例如该服务的 TP99 延迟为 200 毫秒，正常运行时间为 99.9%。
+
+为延迟提出 SLO 可能很棘手。 一方面，您的应用程序提供响应所需的时间可能取决于上游服务返回其响应所需的时间。 如果您是第一次采用 SLO 的概念，您将需要上游服务也提出自己的 SLO。 否则，当他们的服务延迟从 20 毫秒跳到 40 毫秒时，谁知道他们是否真的做错了什么？
+
+要记住的另一件事是，您的服务很可能会在一天中的某些时间和一周中的某些天获得更多流量，尤其是在流量受人际互动控制的情况下。 例如，在线零售商使用的后端服务将在周一、晚上和临近节假日获得更多流量，而接收定期传感器数据的服务将始终以相同的速率处理数据。 无论您决定使用何种 SLO，都需要在流量高峰期保持不变。
+
+可能使测量性能变得困难的是嘈杂邻居的概念。 当服务在具有其他服务的机器上运行并且这些其他服务最终消耗过多资源（例如 CPU 或带宽）时，会出现此问题。 这可能会导致您的服务需要更多时间来响应。
+
+首次从 SLO 开始时，对您的服务执行负载测试作为起点非常有用。 例如，图 3-13 是对我构建的生产应用程序进行基准测试的结果。 通过这项服务，TP99 的延迟为 57 毫秒。 为了更快地获得它，需要性能工作。
+
+在对服务进行负载测试时，请务必完全模拟生产情况。 例如，如果真正的消费者通过反向代理发出请求，那么请确保您的负载测试也通过相同的反向代理，而不是直接连接到服务。
+
+<Figure
+  id="figure_3-13"
+  title="图片 3-13 对生产级别应用程序进行基准测试"
+  src="/books/分布式NodeJS/第3章/图片3-13.png"
+/>
+
+要考虑的另一件事是您的服务的消费者所期望的。 例如，如果您的服务在用户键入查询时为自动完成表单提供建议，那么响应时间小于 100 毫秒是至关重要的。 另一方面，如果您的服务触发了银行贷款的创建，那么 60 秒的响应时间也可能是可以接受的。
+
+如果下游服务对响应时间有硬性要求，而您目前不能满足它，那么您必须找到一种方法来提高服务的性能。 您可以尝试在问题上投入更多的服务器，但通常您需要进入代码并让事情变得更快。 在考虑合并代码时考虑添加性能测试。 第 170 页的“自动化测试”更详细地讨论了自动化测试。
+
+当您确定延迟 SLO 时，您需要确定要运行多少服务实例。 例如，您可能有一个 TP99 响应时间为 100 毫秒的 SLO。 当每分钟处理 500 个请求时，也许单个服务器能够在此级别上执行。 但是，当流量增加到每分钟 1,000 个请求时，TP99 下降到 150 毫秒。 在这种情况下，您需要添加第二个服务。 尝试添加更多服务，并以不同的速率测试负载，以了解需要多少服务才能将流量增加两倍、三倍甚至十倍。
+
+Autocannon 具有 -R 标志，用于指定每秒的确切请求数。 使用它来为您的服务抛出准确的请求率。 一旦你这样做了，你就可以在不同的请求率下测量你的应用程序，并找出它在预期延迟时停止执行的位置。 一旦发生这种情况，添加另一个服务实例并再次测试。 使用这种方法，您将知道需要多少服务实例才能满足基于不同整体吞吐量的 TP99 SLO。
+
+使用示例 3-2 中创建的 cluster-fibonacci.js 应用程序作为指南，您现在将尝试仅测量这一点。 此应用程序的斐波那契限制为 10,000，是一种模拟真实服务的尝试。 您要保持的 TP99 值为 20 毫秒。 根据示例 3-14 中的内容创建另一个 HAProxy 配置文件 haproxy/fibonacci.cfg。 您将在添加新服务实例时迭代此文件。
+
+```text id="3-14" title="haproxy/fibonacci.cfg"
+defaults
+  mode http
+
+frontend inbound
+  bind localhost:5000
+  default_backend fibonacci
+
+backend fibonacci
+  server fibonacci-1 localhost:5001
+  # server fibonacci-2 localhost:5002
+  # server fibonacci-3 localhost:5003
+```
+
+这个应用程序的 CPU 有点太重了。 添加一个 sleep 语句来模拟慢速数据库连接，这应该会使事件循环更加繁忙。 引入一个像这样的 sleep() 函数，导致请求至少多花 10 毫秒：
+
+```js
+// Add this line inside the server.get async handler
+await sleep(10)
+
+// Add this function to the end of the file
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+```
+
+接下来，使用以下命令运行 cluster-fibonacci.js 的单个实例以及 HAProxy：
+
+```shell
+$ PORT=5001 node cluster-fibonacci.js # later run with 5002 & 5003
+$ haproxy -f haproxy/fibonacci.cfg
+$ autocannon -d 60 -c 10 -R 10 http://localhost:5000/10000
+```
+
+我的 TP99 值为 18ms，低于 20ms SLO，所以我知道一个实例可以处理至少 10 r/s 的流量。 所以，现在将这个价值翻倍！ 通过将 -R 标志设置为 20 再次运行 Autocannon 命令。在我的机器上，该值现在是 24 毫秒，这太高了。 当然，你的结果会有所不同。 继续调整每秒请求值，直到达到 20 毫秒 TP99 SLO 阈值。 至此，您已经发现单个服务实例每秒可以处理多少个请求！ 写下那个数字。
+
+接下来，取消注释 haproxy/fibonacci.cfg 文件的倒数第二行。 此外，运行另一个 cluster-fibonacci.js 实例，将 PORT 值设置为 5002。重新启动 HAProxy 以重新加载修改后的配置文件。 然后，使用增加的流量再次运行 Autocannon 命令。 增加每秒请求数，直到再次达到阈值，然后记下该值。 做第三次也是最后一次。 表 3-11 包含我的结果。
+
+```text
+Table 3-11. Fibonacci SLO
+Instance count 1 2 3
+Max r/s 12 23 32
+```
+
+有了这些信息，我可以推断，如果我的服务需要以每秒 10 个请求的速度运行，那么单个实例将允许我为我的消费者兑现 20 毫秒的 SLO。 但是，如果假期即将到来，并且我知道消费者想要以每秒 25 个请求的速率计算第 5,000 个斐波那契数列，那么我将需要运行三个实例。
+
+如果您在当前未做出任何性能承诺的组织工作，我鼓励您衡量您的服务的性能，并以当前性能为起点提出 SLO。 将该 SLO 添加到项目的 README 中，并努力在每个季度对其进行改进。
+
+基准测试结果对于得出初始 SLO 值很有用。 要了解您的应用程序在生产中是否真正实现了 SLO，需要观察实际的生产 SLI。 下一章将介绍可用于衡量 SLI 的应用程序可观察性。
+
+</Section>
+
+</Section>

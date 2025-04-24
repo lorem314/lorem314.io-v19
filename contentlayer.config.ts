@@ -5,7 +5,6 @@ import { remarkCodeHike } from "codehike/mdx"
 import getMdxMeta from "@/utils/getMdxMeta"
 
 const BlogPost = defineDocumentType(() => {
-  console.log("define document type")
   return {
     name: "BlogPost",
     contentType: "mdx",

@@ -53,6 +53,7 @@ export default async function PageBookCover({
               return (
                 <li className="font-bold" key={chapter._id}>
                   <Link
+                    className="text-link-color"
                     href={`/books/${bookCover.title}/第${chapter.chapter}章`}
                   >
                     第 {chapter.chapter} 章 - {chapter.title}

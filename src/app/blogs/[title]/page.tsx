@@ -22,7 +22,7 @@ export default async function Page({
     return <div>not found</div>
   }
 
-  console.log("blogPost", blogPost._raw.flattenedPath)
+  // console.log("blogPost", blogPost._raw.flattenedPath)
 
   return (
     <Layout title={blogPost.title} toc={blogPost.meta.toc}>
